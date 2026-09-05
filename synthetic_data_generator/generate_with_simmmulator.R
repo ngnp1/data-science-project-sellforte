@@ -10,58 +10,64 @@
 
 library(siMMMulator)
 library(dplyr)
+library(yaml)
 
 set.seed(42)
 
 # ---------------------------------------------------------------------------
-# Config
+# Config -- everything simulation-wide lives in config.yaml, informative
+# periods live in events_config.yaml. See DETAILS.md for the full reference.
 # ---------------------------------------------------------------------------
-YEARS <- 2
-START_DATE <- "2024/01/01"
-REVENUE_PER_CONV <- 40
+config <- yaml::read_yaml("config.yaml")
+events <- yaml::read_yaml("events_config.yaml")
 
-COUNTRIES <- list(
-  list(code = "DE", name = "Germany",       market_size = 1.00),
-  list(code = "AT", name = "Austria",       market_size = 0.25),
-  list(code = "CH", name = "Switzerland",   market_size = 0.30),
-  list(code = "US", name = "United States", market_size = 1.30),
-  list(code = "FI", name = "Finland",       market_size = 0.20)
-)
+# yaml parses whole numbers (2, 40, 15000, ...) as R integers, but siMMMulator's
+# input checks require type "double" -- as.numeric() everything pulled from yaml.
+num <- function(x) as.numeric(x)
+field <- function(ch, name, default = NA) if (is.null(ch[[name]])) default else num(ch[[name]])
 
-# channels_impressions first, then channels_clicks -- order matters for every
-# vector argument passed to siMMMulator below.
-CHANNELS_IMPRESSIONS <- c("TV", "Radio", "Google Discovery", "Facebook", "Instagram")
-CHANNELS_CLICKS <- c("Google Search")
+YEARS <- num(config$years)
+START_DATE <- config$start_date
+REVENUE_PER_CONV <- num(config$revenue_per_conv)
+
+BASELINE <- lapply(config$baseline, num)
+CAMPAIGN_SPEND <- lapply(config$campaign_spend, num)
+
+COUNTRIES <- lapply(config$countries, function(c) {
+  c$market_size <- num(c$market_size)
+  c
+})
+
+# a channel's position in config.yaml determines its position in every
+# vector below; impression-type and click-type channels are split out and
+# concatenated impressions-first regardless of how they're ordered in the file
+impression_channels <- Filter(function(ch) ch$type == "impression", config$channels)
+click_channels <- Filter(function(ch) ch$type == "click", config$channels)
+channels_ordered <- c(impression_channels, click_channels)
+
+CHANNELS_IMPRESSIONS <- sapply(impression_channels, function(ch) ch$name)
+CHANNELS_CLICKS <- sapply(click_channels, function(ch) ch$name)
 CHANNELS <- c(CHANNELS_IMPRESSIONS, CHANNELS_CLICKS)
 
-PLATFORM_OF <- c(
-  "TV" = "TV", "Radio" = "Radio",
-  "Google Discovery" = "Google Ads", "Google Search" = "Google Ads",
-  "Facebook" = "Meta", "Instagram" = "Meta"
-)
+PLATFORM_OF <- setNames(sapply(channels_ordered, function(ch) ch$platform), CHANNELS)
 
-TRUE_CVR   <- c(0.00003, 0.00002, 0.00006, 0.00005, 0.00004, 0.02)
-TRUE_CPM   <- c(5, 3, 8, 10, 12, NA)
-TRUE_CPC   <- c(NA, NA, NA, NA, NA, 0.8)
-MEAN_NOISY_CPM_CPC <- rep(0, 6)
-STD_NOISY_CPM_CPC  <- c(0.3, 0.2, 0.5, 0.5, 0.6, 0.05)
-MEAN_NOISY_CVR <- rep(0, 6)
-STD_NOISY_CVR  <- c(0.00001, 0.000008, 0.00002, 0.000015, 0.000012, 0.005)
-TRUE_LAMBDA_DECAY <- c(0.55, 0.35, 0.20, 0.30, 0.25, 0.10)
-ALPHA_SATURATION  <- rep(2, 6)
-GAMMA_SATURATION  <- c(0.4, 0.3, 0.3, 0.3, 0.3, 0.2)
+TRUE_CVR <- sapply(channels_ordered, function(ch) num(ch$true_cvr))
+TRUE_CPM <- sapply(channels_ordered, function(ch) field(ch, "true_cpm"))
+TRUE_CPC <- sapply(channels_ordered, function(ch) field(ch, "true_cpc"))
+MEAN_NOISY_CPM_CPC <- sapply(channels_ordered, function(ch) num(ch$mean_noisy_cpm_cpc))
+STD_NOISY_CPM_CPC <- sapply(channels_ordered, function(ch) num(ch$std_noisy_cpm_cpc))
+MEAN_NOISY_CVR <- sapply(channels_ordered, function(ch) num(ch$mean_noisy_cvr))
+STD_NOISY_CVR <- sapply(channels_ordered, function(ch) num(ch$std_noisy_cvr))
+TRUE_LAMBDA_DECAY <- sapply(channels_ordered, function(ch) num(ch$decay))
+ALPHA_SATURATION <- sapply(channels_ordered, function(ch) num(ch$alpha_saturation))
+GAMMA_SATURATION <- sapply(channels_ordered, function(ch) num(ch$gamma_saturation))
 
-# min/max proportion of daily budget for the first 5 channels (Google Search,
-# the last channel, automatically receives whatever remains)
-MAX_MIN_PROPORTION <- c(
-  0.36, 0.44,  # TV
-  0.08, 0.12,  # Radio
-  0.05, 0.09,  # Google Discovery
-  0.11, 0.15,  # Facebook
-  0.05, 0.09   # Instagram
-)
-
-events <- read.csv("events_config.csv", stringsAsFactors = FALSE)
+# min/max spend share for every channel except the last (which receives
+# whatever remains)
+all_but_last <- channels_ordered[-length(channels_ordered)]
+MAX_MIN_PROPORTION <- unlist(lapply(all_but_last, function(ch) {
+  c(num(ch$spend_share_min), num(ch$spend_share_max))
+}))
 
 # ---------------------------------------------------------------------------
 # Inject an informative period directly into step-2 spend.
@@ -70,9 +76,8 @@ events <- read.csv("events_config.csv", stringsAsFactors = FALSE)
 # campaign_id in (start_day+1) .. end_day.
 # ---------------------------------------------------------------------------
 inject_events <- function(df_ads_step2, country_code) {
-  ev_country <- events[events$country == country_code, ]
-  for (i in seq_len(nrow(ev_country))) {
-    ev <- ev_country[i, ]
+  for (ev in events) {
+    if (ev$country != country_code) next
     day_range <- (ev$start_day + 1):ev$end_day
 
     if (ev$pattern_type == "single_channel") {
@@ -110,18 +115,18 @@ run_country <- function(country) {
 
   df_baseline <- step_1_create_baseline(
     my_variables = my_variables,
-    base_p = 15000 * ms,
-    trend_p = 0.5,
-    temp_var = 2,
-    temp_coef_mean = 100 * ms,
-    temp_coef_sd = 500 * ms,
-    error_std = 100 * ms
+    base_p = BASELINE$daily_mean * ms,
+    trend_p = BASELINE$trend_p,
+    temp_var = BASELINE$temp_var,
+    temp_coef_mean = BASELINE$temp_coef_mean * ms,
+    temp_coef_sd = BASELINE$temp_coef_sd * ms,
+    error_std = BASELINE$error_std * ms
   )
 
   df_ads_step2 <- step_2_ads_spend(
     my_variables = my_variables,
-    campaign_spend_mean = 18500 * ms,
-    campaign_spend_std = 4000 * ms,
+    campaign_spend_mean = CAMPAIGN_SPEND$daily_total_mean * ms,
+    campaign_spend_std = CAMPAIGN_SPEND$daily_total_std * ms,
     max_min_proportion_on_each_channel = MAX_MIN_PROPORTION
   )
 
@@ -181,16 +186,5 @@ all_countries_df <- bind_rows(lapply(COUNTRIES, run_country))
 
 write.csv(all_countries_df, "raw_daily_wide.csv", row.names = FALSE)
 
-channels_meta <- data.frame(
-  channel = CHANNELS,
-  platform = unname(PLATFORM_OF[CHANNELS]),
-  type = c(rep("impression", length(CHANNELS_IMPRESSIONS)), rep("click", length(CHANNELS_CLICKS)))
-)
-write.csv(channels_meta, "channels_meta.csv", row.names = FALSE)
-
-run_meta <- data.frame(revenue_per_conv = REVENUE_PER_CONV, start_date = START_DATE, years = YEARS)
-write.csv(run_meta, "run_meta.csv", row.names = FALSE)
-
-cat("\nDone. Wrote raw_daily_wide.csv (", nrow(all_countries_df), "rows ),",
-    "channels_meta.csv, run_meta.csv.\n")
+cat("\nDone. Wrote raw_daily_wide.csv (", nrow(all_countries_df), "rows ).\n")
 cat("Next: run `python reformat.py` to produce media.csv / sales.csv / ground_truth.csv\n")

@@ -3,6 +3,10 @@ Reshape siMMMulator's raw multi-country wide output (raw_daily_wide.csv, produce
 generate_with_simmmulator.R) into the media.csv / sales.csv schema used by the
 Sellforte samples, plus a ground_truth.csv answer key and true_roi.csv.
 
+All configuration (countries, channels, customer types, sales channels) comes
+from config.yaml, the same file generate_with_simmmulator.R reads -- one
+source of truth for both languages.
+
 Usage:
     python reformat.py
 """
@@ -11,24 +15,9 @@ import hashlib
 
 import numpy as np
 import pandas as pd
+import yaml
 
 RNG = np.random.default_rng(42)
-
-COUNTRY_NAMES = {
-    "DE": "Germany", "AT": "Austria", "CH": "Switzerland",
-    "US": "United States", "FI": "Finland",
-}
-CUSTOMER_TYPES = ["New", "Returning"]
-SALES_CHANNELS = ["Ecom", "Stores"]
-
-# Purely cosmetic: siMMMulator only simulates impressions OR clicks per channel
-# (never both). To match the sample schema (both columns present for every
-# channel) we back out an implied secondary metric using an assumed CTR. This
-# has no effect on spend, decay, saturation, or conversions -- display only.
-ASSUMED_CTR = {
-    "TV": 0.001, "Radio": 0.0008, "Google Discovery": 0.015,
-    "Facebook": 0.012, "Instagram": 0.010, "Google Search": 0.05,
-}
 
 
 def r_colname(channel):
@@ -41,10 +30,11 @@ def stable_campaign_id(platform, channel, country_code):
     return int(h[:9], 16) % 900_000_000 + 100_000_000
 
 
-def build_media_df(raw, channels_meta, revenue_per_conv):
+def build_media_df(raw, channels, revenue_per_conv):
     rows = []
-    for _, ch in channels_meta.iterrows():
-        channel, platform, ch_type = ch["channel"], ch["platform"], ch["type"]
+    for ch in channels:
+        channel, platform, ch_type = ch["name"], ch["platform"], ch["type"]
+        assumed_ctr = ch["assumed_ctr"]
         col = r_colname(channel)
 
         spend = raw[f"spend_{col}"].values
@@ -53,10 +43,10 @@ def build_media_df(raw, channels_meta, revenue_per_conv):
 
         if ch_type == "impression":
             impressions = raw[f"impressions_{col}"].values
-            clicks = impressions * ASSUMED_CTR[channel] * RNG.lognormal(0, 0.05, len(raw))
+            clicks = impressions * assumed_ctr * RNG.lognormal(0, 0.05, len(raw))
         else:
             clicks = raw[f"clicks_{col}"].values
-            impressions = clicks / ASSUMED_CTR[channel] * RNG.lognormal(0, 0.05, len(raw))
+            impressions = clicks / assumed_ctr * RNG.lognormal(0, 0.05, len(raw))
 
         campaign_id = stable_campaign_id(platform, channel, raw["country_code"].iloc[0])
         campaign_name = f"{platform}_{channel}_{raw['country_code'].iloc[0]}"
@@ -77,10 +67,10 @@ def build_media_df(raw, channels_meta, revenue_per_conv):
     return pd.concat(rows, ignore_index=True)
 
 
-def build_sales_df(raw, country_code, country_name):
+def build_sales_df(raw, country_code, country_name, customer_types, sales_channels):
     n = len(raw)
-    combos = [(ct, sc) for ct in CUSTOMER_TYPES for sc in SALES_CHANNELS]
-    splits = RNG.dirichlet(alpha=[3, 2, 2, 1], size=n)
+    combos = [(ct, sc) for ct in customer_types for sc in sales_channels]
+    splits = RNG.dirichlet(alpha=[3, 2, 2, 1][: len(combos)], size=n)
 
     rows = []
     for i in range(n):
@@ -116,19 +106,26 @@ def build_ground_truth(events, dates_by_country):
 
 
 def main():
+    with open("config.yaml") as f:
+        config = yaml.safe_load(f)
+    with open("events_config.yaml") as f:
+        events = pd.DataFrame(yaml.safe_load(f))
+
     raw = pd.read_csv("raw_daily_wide.csv", parse_dates=["DATE"])
-    channels_meta = pd.read_csv("channels_meta.csv")
-    run_meta = pd.read_csv("run_meta.csv")
-    events = pd.read_csv("events_config.csv")
-    revenue_per_conv = run_meta["revenue_per_conv"].iloc[0]
+
+    country_names = {c["code"]: c["name"] for c in config["countries"]}
+    revenue_per_conv = config["revenue_per_conv"]
 
     media_parts, sales_parts = [], []
     dates_by_country = {}
     for country_code, group in raw.groupby("country_code"):
         group = group.sort_values("DATE").reset_index(drop=True)
         dates_by_country[country_code] = group["DATE"]
-        media_parts.append(build_media_df(group, channels_meta, revenue_per_conv))
-        sales_parts.append(build_sales_df(group, country_code, COUNTRY_NAMES[country_code]))
+        media_parts.append(build_media_df(group, config["channels"], revenue_per_conv))
+        sales_parts.append(build_sales_df(
+            group, country_code, country_names[country_code],
+            config["customer_types"], config["sales_channels"],
+        ))
 
     media_df = pd.concat(media_parts, ignore_index=True)
     sales_df = pd.concat(sales_parts, ignore_index=True)
