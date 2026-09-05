@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# synthetic_data_generator
+synthetic_data_generator/.venv/
+synthetic_data_generator/raw_daily_wide.csv
+__pycache__/
+*.pyc
