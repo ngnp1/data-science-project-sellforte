@@ -1,9 +1,0 @@
-pattern_id,pattern_type,country,channel,start_day,end_day,multiplier,description
-DE_DARK_01,dark_period,DE,ALL,175,230,0,"All German advertising is off for ~8 weeks."
-FI_SINGLE_SEARCH_01,single_channel,FI,Google Search,250,280,0,"Only Google Search remains active in Finland; all other channels off."
-AT_FACEBOOK_HOLDOUT_01,natural_holdout,AT,Facebook,400,442,0,"Facebook advertising stops in Austria while other channels continue."
-CH_SEARCH_STEP_01,step_change,CH,Google Search,500,556,3,"Google Search spend triples in Switzerland for 8 weeks."
-DE_RADIO_PULSE_01,channel_pulse,DE,Radio,40,54,0,"Radio off for 2 weeks (pulse 1 of 3, to expose adstock decay)."
-DE_RADIO_PULSE_02,channel_pulse,DE,Radio,68,82,0,"Radio off for 2 weeks (pulse 2 of 3)."
-DE_RADIO_PULSE_03,channel_pulse,DE,Radio,96,110,0,"Radio off for 2 weeks (pulse 3 of 3)."
-US_INSTAGRAM_LAUNCH_01,staggered_launch,US,Instagram,0,90,0,"Instagram launches in the US 90 days later than in other countries."

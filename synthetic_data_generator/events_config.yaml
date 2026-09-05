@@ -1,0 +1,75 @@
+# Injected informative periods (the answer key).
+# start_day / end_day are 0-indexed day offsets from START_DATE, Python-slice
+# convention: affected days are start_day .. end_day-1. See DETAILS.md.
+
+- pattern_id: DE_DARK_01
+  pattern_type: dark_period
+  country: DE
+  channel: ALL
+  start_day: 175
+  end_day: 230
+  multiplier: 0
+  description: All German advertising is off for ~8 weeks.
+
+- pattern_id: FI_SINGLE_SEARCH_01
+  pattern_type: single_channel
+  country: FI
+  channel: Google Search
+  start_day: 250
+  end_day: 280
+  multiplier: 0
+  description: Only Google Search remains active in Finland; all other channels off.
+
+- pattern_id: AT_FACEBOOK_HOLDOUT_01
+  pattern_type: natural_holdout
+  country: AT
+  channel: Facebook
+  start_day: 400
+  end_day: 442
+  multiplier: 0
+  description: Facebook advertising stops in Austria while other channels continue.
+
+- pattern_id: CH_SEARCH_STEP_01
+  pattern_type: step_change
+  country: CH
+  channel: Google Search
+  start_day: 500
+  end_day: 556
+  multiplier: 3
+  description: Google Search spend triples in Switzerland for 8 weeks.
+
+- pattern_id: DE_RADIO_PULSE_01
+  pattern_type: channel_pulse
+  country: DE
+  channel: Radio
+  start_day: 40
+  end_day: 54
+  multiplier: 0
+  description: "Radio off for 2 weeks (pulse 1 of 3, to expose adstock decay)."
+
+- pattern_id: DE_RADIO_PULSE_02
+  pattern_type: channel_pulse
+  country: DE
+  channel: Radio
+  start_day: 68
+  end_day: 82
+  multiplier: 0
+  description: "Radio off for 2 weeks (pulse 2 of 3)."
+
+- pattern_id: DE_RADIO_PULSE_03
+  pattern_type: channel_pulse
+  country: DE
+  channel: Radio
+  start_day: 96
+  end_day: 110
+  multiplier: 0
+  description: "Radio off for 2 weeks (pulse 3 of 3)."
+
+- pattern_id: US_INSTAGRAM_LAUNCH_01
+  pattern_type: staggered_launch
+  country: US
+  channel: Instagram
+  start_day: 0
+  end_day: 90
+  multiplier: 0
+  description: Instagram launches in the US 90 days later than in other countries.

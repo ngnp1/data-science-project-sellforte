@@ -1,0 +1,147 @@
+# Simulation-wide settings and per-channel/per-country parameters for
+# generate_with_simmmulator.R. See DETAILS.md for what each field means and
+# how to change it safely.
+
+years: 2
+start_date: "2024/01/01"
+revenue_per_conv: 40   # single global scalar, siMMMulator does not support one per channel
+
+# used only by reformat.py (Python side), for splitting total sales into rows
+customer_types: [New, Returning]
+sales_channels: [Ecom, Stores]
+
+baseline:
+  daily_mean: 15000
+  trend_p: 0.5
+  temp_var: 2
+  temp_coef_mean: 100
+  temp_coef_sd: 500
+  error_std: 100
+
+campaign_spend:
+  daily_total_mean: 18500
+  daily_total_std: 4000
+
+countries:
+  - code: DE
+    name: Germany
+    market_size: 1.00
+  - code: AT
+    name: Austria
+    market_size: 0.25
+  - code: CH
+    name: Switzerland
+    market_size: 0.30
+  - code: US
+    name: United States
+    market_size: 1.30
+  - code: FI
+    name: Finland
+    market_size: 0.20
+
+# Every channel needs: name, type (impression or click), platform, true_cvr,
+# decay, alpha_saturation, gamma_saturation. Impression-type channels need
+# true_cpm; click-type channels need true_cpc. Every channel except the last
+# in this list needs spend_share_min/spend_share_max (the last channel
+# automatically receives whatever budget share remains).
+#
+# assumed_ctr is used only by reformat.py (Python side): siMMMulator only
+# ever simulates impressions OR clicks per channel, never both, so this backs
+# out a cosmetic value for whichever column the channel didn't get, purely so
+# media.csv has both columns populated like the sample schema. It has zero
+# effect on spend, decay, saturation, or conversions.
+channels:
+  - name: TV
+    type: impression
+    platform: TV
+    true_cvr: 0.00003
+    true_cpm: 5
+    mean_noisy_cpm_cpc: 0
+    std_noisy_cpm_cpc: 0.3
+    mean_noisy_cvr: 0
+    std_noisy_cvr: 0.00001
+    decay: 0.55
+    alpha_saturation: 2
+    gamma_saturation: 0.4
+    spend_share_min: 0.36
+    spend_share_max: 0.44
+    assumed_ctr: 0.001
+
+  - name: Radio
+    type: impression
+    platform: Radio
+    true_cvr: 0.00002
+    true_cpm: 3
+    mean_noisy_cpm_cpc: 0
+    std_noisy_cpm_cpc: 0.2
+    mean_noisy_cvr: 0
+    std_noisy_cvr: 0.000008
+    decay: 0.35
+    alpha_saturation: 2
+    gamma_saturation: 0.3
+    spend_share_min: 0.08
+    spend_share_max: 0.12
+    assumed_ctr: 0.0008
+
+  - name: Google Discovery
+    type: impression
+    platform: Google Ads
+    true_cvr: 0.00006
+    true_cpm: 8
+    mean_noisy_cpm_cpc: 0
+    std_noisy_cpm_cpc: 0.5
+    mean_noisy_cvr: 0
+    std_noisy_cvr: 0.00002
+    decay: 0.20
+    alpha_saturation: 2
+    gamma_saturation: 0.3
+    spend_share_min: 0.05
+    spend_share_max: 0.09
+    assumed_ctr: 0.015
+
+  - name: Facebook
+    type: impression
+    platform: Meta
+    true_cvr: 0.00005
+    true_cpm: 10
+    mean_noisy_cpm_cpc: 0
+    std_noisy_cpm_cpc: 0.5
+    mean_noisy_cvr: 0
+    std_noisy_cvr: 0.000015
+    decay: 0.30
+    alpha_saturation: 2
+    gamma_saturation: 0.3
+    spend_share_min: 0.11
+    spend_share_max: 0.15
+    assumed_ctr: 0.012
+
+  - name: Instagram
+    type: impression
+    platform: Meta
+    true_cvr: 0.00004
+    true_cpm: 12
+    mean_noisy_cpm_cpc: 0
+    std_noisy_cpm_cpc: 0.6
+    mean_noisy_cvr: 0
+    std_noisy_cvr: 0.000012
+    decay: 0.25
+    alpha_saturation: 2
+    gamma_saturation: 0.3
+    spend_share_min: 0.05
+    spend_share_max: 0.09
+    assumed_ctr: 0.010
+
+  - name: Google Search
+    type: click
+    platform: Google Ads
+    true_cvr: 0.02
+    true_cpc: 0.8
+    mean_noisy_cpm_cpc: 0
+    std_noisy_cpm_cpc: 0.05
+    mean_noisy_cvr: 0
+    std_noisy_cvr: 0.005
+    decay: 0.10
+    alpha_saturation: 2
+    gamma_saturation: 0.2
+    assumed_ctr: 0.05
+    # last channel: gets whatever spend share remains, no min/max needed

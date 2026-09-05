@@ -9,36 +9,40 @@ algorithms against a known answer key before the real dataset arrives.
 
 ## How it works
 
-Two stages:
+Two stages, one shared config:
 
 1. **R: [`generate_with_simmmulator.R`](generate_with_simmmulator.R)**
    Uses Meta's open-source [siMMMulator](https://github.com/facebookexperimental/siMMMulator)
    package to simulate baseline sales, ad spend, adstock decay, and
-   diminishing returns for 6 channels across 5 countries. Before decay and
-   saturation run, it injects the patterns listed in
-   [`events_config.csv`](events_config.csv) directly into daily spend.
-   Output: `raw_daily_wide.csv` (not committed, regenerate it, see below).
+   diminishing returns for every channel and country listed in
+   [`config.yaml`](config.yaml). Before decay and saturation run, it injects
+   the patterns listed in [`events_config.yaml`](events_config.yaml) directly
+   into daily spend. Output: `raw_daily_wide.csv` (not committed, regenerate
+   it, see below).
 
 2. **Python: [`reformat.py`](reformat.py)**
-   Reshapes siMMMulator's wide per-country output into the long
-   `media.csv` / `sales.csv` format, and writes `ground_truth.csv` (the
-   answer key) and `true_roi.csv` (ground-truth ROI per channel).
+   Reads the same `config.yaml`, and reshapes siMMMulator's wide per-country
+   output into the long `media.csv` / `sales.csv` format. Writes
+   `ground_truth.csv` (the answer key) and `true_roi.csv` (ground-truth ROI
+   per channel).
 
-See [`DETAILS.md`](DETAILS.md) for the parameter reference: countries,
-channels, spend levels, and how to change the injected patterns.
+**`config.yaml` and `events_config.yaml` are the only two config files, and
+both scripts read them directly.** Nothing about countries, channels, spend
+levels, or injected patterns is hardcoded separately in the R or Python code.
+See [`DETAILS.md`](DETAILS.md) for the full field reference.
 
 ## Setup
 
-R needs the `siMMMulator` package:
+R needs the `siMMMulator` and `yaml` packages:
 ```r
-install.packages("remotes")
+install.packages(c("remotes", "yaml"))
 remotes::install_github("facebookexperimental/siMMMulator")
 ```
 
-Python needs pandas and numpy:
+Python needs pandas, numpy, and PyYAML:
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install pandas numpy
+.venv/bin/pip install pandas numpy pyyaml
 ```
 
 ## Usage
@@ -50,10 +54,14 @@ Rscript generate_with_simmmulator.R
 .venv/bin/python reformat.py
 ```
 
-This regenerates `raw_daily_wide.csv`, `channels_meta.csv`, `run_meta.csv`,
-and `data/media.csv`, `data/sales.csv`, `data/ground_truth.csv`,
-`data/true_roi.csv`. The `data/` files in this repo are already generated, so
-you can use the dataset without running R at all.
+This regenerates `raw_daily_wide.csv` and `data/media.csv`,
+`data/sales.csv`, `data/ground_truth.csv`, `data/true_roi.csv`. The `data/`
+files in this repo are already generated, so you can use the dataset without
+running R at all.
+
+To change what gets generated (add a country, tune a channel's decay rate,
+add a new injected pattern), edit `config.yaml` or `events_config.yaml` and
+rerun both commands. No code changes needed for any of that.
 
 ## Output files: what you actually need
 
@@ -66,7 +74,7 @@ you can use the dataset without running R at all.
 
 ## Injected informative periods
 
-Defined in [`events_config.csv`](events_config.csv), applied to simulated
+Defined in [`events_config.yaml`](events_config.yaml), applied to simulated
 spend before conversions are calculated:
 
 | pattern_id | pattern_type | country | channel | window |
