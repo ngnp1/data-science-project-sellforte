@@ -101,12 +101,27 @@ def test_negative_controls_are_exactly_the_two_intended_types():
 
 
 def test_ids_are_unique_across_a_mixed_scenario():
+    # Test with distinct country/channel pairs (original coverage)
     entries = (events.dark("DE", 100, 42)
                + events.holdout("AT", "Facebook", 400, 42)
                + events.pulse("DE", "Radio", [40, 68, 96], 14)
                + events.step("CH", "Google Search", 500, 56, 3))
     ids = [e["pattern_id"] for e in entries]
     assert len(ids) == len(set(ids))
+
+    # Add coverage for collision detection: call pulse, ramp, intermittent twice
+    # for the SAME country/channel at different windows, plus launch twice for
+    # the same country/channel with different lengths.
+    entries = (events.pulse("DE", "Radio", [40, 68, 96], 14)
+               + events.pulse("DE", "Radio", [400, 428], 14)
+               + events.ramp("SE", "TV", 200, 10, [1.2, 1.4])
+               + events.ramp("SE", "TV", 500, 10, [1.5, 1.7])
+               + events.intermittent("NL", "TikTok", 3, 3, 14, start=30)
+               + events.intermittent("NL", "TikTok", 2, 3, 14, start=200)
+               + events.launch("US", "Instagram", 90)
+               + events.launch("US", "Instagram", 60))
+    ids = [e["pattern_id"] for e in entries]
+    assert len(ids) == len(set(ids)), f"Duplicate ids found: {[x for x in ids if ids.count(x) > 1]}"
 
 
 def test_length_beyond_the_series_is_rejected():

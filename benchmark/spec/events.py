@@ -72,7 +72,7 @@ def step(country, channel, start, length, multiplier, n_days=DEFAULT_N_DAYS):
 def pulse(country, channel, starts, length, n_days=DEFAULT_N_DAYS):
     """On/off/on. The only place adstock decay is observable."""
     return [
-        _entry(f"{country}_PULSE_{_slug(channel)}_{i + 1}", "channel_pulse",
+        _entry(f"{country}_PULSE_{_slug(channel)}_{s}", "channel_pulse",
                country, channel, s, s + length, 0,
                f"{channel} off for {length} days in {country} "
                f"(pulse {i + 1} of {len(starts)}).", n_days)
@@ -82,7 +82,7 @@ def pulse(country, channel, starts, length, n_days=DEFAULT_N_DAYS):
 
 def launch(country, channel, length, n_days=DEFAULT_N_DAYS):
     """A channel is dormant at the start of the series, then launches."""
-    return [_entry(f"{country}_LAUNCH_{_slug(channel)}", "staggered_launch",
+    return [_entry(f"{country}_LAUNCH_{_slug(channel)}_{length}", "staggered_launch",
                    country, channel, 0, length, 0,
                    f"{channel} launches in {country} {length} days into the "
                    f"series.", n_days)]
@@ -106,7 +106,7 @@ def ramp(country, channel, start, block, multipliers, n_days=DEFAULT_N_DAYS):
     out = []
     for i, m in enumerate(multipliers):
         s = start + i * block
-        out.append(_entry(f"{country}_RAMP_{_slug(channel)}_{i + 1}",
+        out.append(_entry(f"{country}_RAMP_{_slug(channel)}_{s}",
                           "ramp_block", country, channel, s, s + block, m,
                           f"Ramp block {i + 1} of {len(multipliers)} at "
                           f"{m:g}x -- gradual drift, not a step.", n_days))
@@ -118,7 +118,7 @@ def intermittent(country, channel, n, off_len, period, start=0,
     """NEGATIVE CONTROL. A flighting channel whose short gaps are normal. Any
     single gap detected as a holdout is a false positive."""
     return [
-        _entry(f"{country}_INTERMITTENT_{_slug(channel)}_{i + 1}",
+        _entry(f"{country}_INTERMITTENT_{_slug(channel)}_{start + i * period}",
                "intermittent_baseline", country, channel,
                start + i * period, start + i * period + off_len, 0,
                f"Routine {off_len}-day flighting gap {i + 1} of {n}.", n_days)
