@@ -33,7 +33,14 @@ events <- yaml::read_yaml(opts$events)
 # yaml parses whole numbers (2, 40, 15000, ...) as R integers, but siMMMulator's
 # input checks require type "double" -- as.numeric() everything pulled from yaml.
 num <- function(x) as.numeric(x)
-field <- function(ch, name, default = NA) if (is.null(ch[[name]])) default else num(ch[[name]])
+# default is NA_real_ (not NA) so that TRUE_CPM/TRUE_CPC stay type "double"
+# even in a homogeneous-channel scenario where every element hits the
+# default (e.g. an all-click channel set has no true_cpm anywhere): sapply
+# over a list of all-logical-NA scalars simplifies to a logical vector, and
+# siMMMulator's step_3_generate_media requires is.double(true_cpm). In the
+# mixed-type case this was already a no-op -- at least one real numeric
+# value forced the same promotion during simplification either way.
+field <- function(ch, name, default = NA_real_) if (is.null(ch[[name]])) default else num(ch[[name]])
 
 YEARS <- num(config$years)
 START_DATE <- config$start_date
@@ -54,8 +61,16 @@ impression_channels <- Filter(function(ch) ch$type == "impression", config$chann
 click_channels <- Filter(function(ch) ch$type == "click", config$channels)
 channels_ordered <- c(impression_channels, click_channels)
 
-CHANNELS_IMPRESSIONS <- sapply(impression_channels, function(ch) ch$name)
-CHANNELS_CLICKS <- sapply(click_channels, function(ch) ch$name)
+# vapply (not sapply) so that a scenario with channels of only one type
+# yields a genuine character(0) on the other side instead of sapply's
+# list() on empty input -- c() on character + list coerces the whole
+# result to a list, which corrupts the `channel` column many steps later.
+# siMMMulator's step_3_generate_media explicitly supports a zero-length
+# channels_impressions or channels_clicks (see its
+# `if (length(channels_impressions) == 0)` guard), so a real character(0)
+# is exactly what it expects.
+CHANNELS_IMPRESSIONS <- vapply(impression_channels, function(ch) ch$name, character(1))
+CHANNELS_CLICKS <- vapply(click_channels, function(ch) ch$name, character(1))
 CHANNELS <- c(CHANNELS_IMPRESSIONS, CHANNELS_CLICKS)
 
 PLATFORM_OF <- setNames(sapply(channels_ordered, function(ch) ch$platform), CHANNELS)
