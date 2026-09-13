@@ -32,6 +32,30 @@ FINAL_RUNS = Path(__file__).resolve().parent / "final_runs.jsonl"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _prior_run_count() -> int:
+    """Number of final-run records already in FINAL_RUNS, or 0 if the file is
+    absent or empty. Read fresh each time so it reflects FINAL_RUNS at the
+    moment it's called -- including when a test monkeypatches the path."""
+    if FINAL_RUNS.is_file() and FINAL_RUNS.read_text().strip():
+        return len(FINAL_RUNS.read_text().splitlines())
+    return 0
+
+
+def _repeat_run_banner(run_index: int, prior_count: int) -> str:
+    """A Markdown banner naming this as a repeat final run, so a reader of the
+    rendered report (or the --out file) sees it without having to go count
+    lines in final_runs.jsonl. Empty when this is the first run, so it
+    composes cleanly with the report either way."""
+    if not prior_count:
+        return ""
+    return (
+        f"> **REPEAT FINAL RUN -- this is final run #{run_index}.** "
+        f"{prior_count} prior final run(s) are already recorded in "
+        f"`final_runs.jsonl`. This is NOT the first final evaluation of the "
+        f"sealed test split.\n\n"
+    )
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -64,15 +88,17 @@ def main(argv=None) -> int:
     marker = json.loads(
         (PROJECT_ROOT / "benchmark/datasets/test/SEALED").read_text())
 
-    if FINAL_RUNS.is_file() and FINAL_RUNS.read_text().strip():
-        n = len(FINAL_RUNS.read_text().splitlines())
-        print(f"*** NOTE: final_runs.jsonl already has {n} record(s). "
+    prior_count = _prior_run_count()
+    run_index = prior_count + 1
+
+    if prior_count:
+        print(f"*** NOTE: final_runs.jsonl already has {prior_count} record(s). "
               f"This is not the first final evaluation, and the report must "
               f"say so. ***\n", file=sys.stderr)
 
     results = evaluate_split(load_detector(args.detector), "test",
                              load_data=args.load_data)
-    report = render_markdown(results)
+    report = _repeat_run_banner(run_index, prior_count) + render_markdown(results)
     print(report)
     if args.out:
         Path(args.out).write_text(report)
@@ -80,6 +106,7 @@ def main(argv=None) -> int:
     o = results["overall"]
     record = {
         "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+        "run_index": run_index,
         "detector": args.detector,
         "detection_source_hash": source_hash(PROJECT_ROOT / "detection"),
         "sealed_spec_hash": marker["spec_hash"],
