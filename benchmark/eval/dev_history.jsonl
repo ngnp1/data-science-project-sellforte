@@ -1,0 +1,2 @@
+{"detector": "benchmark.eval.detectors_for_testing:perfect_oracle", "label": "harness-selftest", "metrics": {"f1": 1.0, "mean_iou": 1.0, "null_fp_rate": 0.0, "precision": 1.0, "recall": 1.0}, "n_scenarios": 5, "source_hash": "absent", "timestamp": "2026-09-13T19:13:12+00:00"}
+{"detector": "benchmark.eval.detectors_for_testing:perfect_oracle", "label": "harness-selftest", "metrics": {"f1": 1.0, "mean_iou": 1.0, "null_fp_rate": 0.0, "precision": 1.0, "recall": 1.0}, "n_scenarios": 5, "source_hash": "absent", "timestamp": "2026-09-13T19:13:26+00:00"}
