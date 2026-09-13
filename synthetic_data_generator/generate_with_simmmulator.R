@@ -12,14 +12,23 @@ library(siMMMulator)
 library(dplyr)
 library(yaml)
 
-set.seed(42)
+# Resolve this script's own directory so cli_args.R can be sourced and the
+# script can be invoked from any working directory.
+.this_file <- sub("^--file=", "",
+                  grep("^--file=", commandArgs(FALSE), value = TRUE)[1])
+.script_dir <- if (is.na(.this_file)) "." else dirname(normalizePath(.this_file))
+source(file.path(.script_dir, "cli_args.R"))
+
+opts <- parse_cli_args(commandArgs(trailingOnly = TRUE))
+
+set.seed(opts$seed)
 
 # ---------------------------------------------------------------------------
 # Config -- everything simulation-wide lives in config.yaml, informative
 # periods live in events_config.yaml. See DETAILS.md for the full reference.
 # ---------------------------------------------------------------------------
-config <- yaml::read_yaml("config.yaml")
-events <- yaml::read_yaml("events_config.yaml")
+config <- yaml::read_yaml(opts$config)
+events <- yaml::read_yaml(opts$events)
 
 # yaml parses whole numbers (2, 40, 15000, ...) as R integers, but siMMMulator's
 # input checks require type "double" -- as.numeric() everything pulled from yaml.
@@ -184,7 +193,9 @@ run_country <- function(country) {
 
 all_countries_df <- bind_rows(lapply(COUNTRIES, run_country))
 
-write.csv(all_countries_df, "raw_daily_wide.csv", row.names = FALSE)
+dir.create(opts$outdir, showWarnings = FALSE, recursive = TRUE)
+raw_path <- file.path(opts$outdir, "raw_daily_wide.csv")
+write.csv(all_countries_df, raw_path, row.names = FALSE)
 
-cat("\nDone. Wrote raw_daily_wide.csv (", nrow(all_countries_df), "rows ).\n")
+cat("\nDone. Wrote", raw_path, "(", nrow(all_countries_df), "rows ).\n")
 cat("Next: run `python reformat.py` to produce media.csv / sales.csv / ground_truth.csv\n")
