@@ -4,6 +4,10 @@
     python -m benchmark.harness.generate --split dev
     python -m benchmark.harness.generate --split test
     python -m benchmark.harness.generate --split test --seal
+    python -m benchmark.harness.generate --split test --seal-only
+
+--seal and --seal-only require an explicit --split; they refuse --split all,
+which would otherwise seal the dev split.
 
 Generation is resumable: a scenario whose outputs already exist is skipped
 unless --force is passed, so an interrupted 45-minute run can be restarted.
@@ -47,6 +51,20 @@ from benchmark.spec import scenarios
 #     n_channels=6   1 country  1 year  ->  21.76s
 #     n_channels=9   1 country  1 year  ->  48.20s
 #     n_channels=12  1 country  1 year  ->  84.05s
+#
+# MEASURED SINGLE-PROCESS -- this table UNDERESTIMATES BY ROUGHLY 2x under the
+# default 6 workers. Each number above was timed with one Rscript alone on the
+# machine; the real 100-scenario run took 99.3 min at --workers 6 against the
+# 52 min this table predicts, a contention factor of >= 2.68x once six R
+# processes compete for six performance cores. Treat the estimate the CLI
+# prints as a floor, not a forecast.
+#
+# The same contention is what makes runner.R_TIMEOUT_S (1800 s) tighter than it
+# looks: the most expensive point in the variation space (8 countries x 12
+# channels x 1 year) models at 8 * 84.05 = 672 s here and measured ~840 s, only
+# ~2.14x of headroom -- less than the contention factor already observed. It
+# duly timed out at 1801.0 s during the real run and had to be retried with
+# --workers 1 (see benchmark/BENCHMARK.md, "Runtime").
 #
 # Re-measure and update this table if the generator, its dependencies, or the
 # machine running it changes materially.
@@ -93,7 +111,7 @@ def _plan(scns):
 
 
 def _missing_scenarios(split: str, sp_scns, root: Path) -> list[str]:
-    """sids in `sp_scns` that do not have media.csv on disk under `root`.
+    """sids in `sp_scns` that are not fully generated on disk under `root`.
 
     The one completeness check both --seal and --seal-only must use: sealing
     is the mechanism the whole benchmark's black-box claim rests on, so
@@ -102,9 +120,17 @@ def _missing_scenarios(split: str, sp_scns, root: Path) -> list[str]:
     from --limit, a failed scenario, or a --split mismatch -- --seal runs
     right after generation, but that generation may not have covered every
     scenario in the split, so the check still applies there too.
+
+    It delegates to `runner._is_complete` rather than re-deriving the rule:
+    this used to check media.csv alone, one module away from a stricter
+    definition of "generated" that also requires the truth side. Since
+    `run_scenario` writes the data side first, a crash between the two left a
+    tree that the weaker check would have happily sealed, with the answers
+    missing or half-written. One definition, used by the resume logic and the
+    seal alike, is the only way those two cannot drift apart again.
     """
     return [s.sid for s in sp_scns
-            if not (root / split / s.sid / "media.csv").is_file()]
+            if not runner._is_complete(split, s.sid, root)]
 
 
 def main(argv=None) -> int:
@@ -124,6 +150,17 @@ def main(argv=None) -> int:
                    help="generate only the first N scenarios, for smoke tests")
     p.add_argument("--root", default=str(runner.DATASETS_DIR))
     args = p.parse_args(argv)
+
+    if args.split == "all" and (args.seal or args.seal_only):
+        # --split defaults to "all", so a bare `--seal` would seal DEV first --
+        # violating "dev must stay writable, it is where iteration happens" --
+        # and only then hit the already-sealed test split and die on an
+        # unhandled RuntimeError, with the damage already done.
+        flag = "--seal-only" if args.seal_only else "--seal"
+        print(f"ERROR: {flag} requires an explicit --split (dev or test). "
+              f"With --split all it would seal the dev split too, and dev must "
+              f"stay writable.", file=sys.stderr)
+        return 2
 
     root = Path(args.root)
     splits = ["dev", "test"] if args.split == "all" else [args.split]

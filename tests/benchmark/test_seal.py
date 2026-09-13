@@ -74,11 +74,29 @@ def test_verify_seal_checks_both_data_and_truth(fake_split):
     from benchmark.spec import scenarios
     scns = scenarios.build_split("test")[:2]
     seal.seal_split("test", scns, root=fake_split)
-    assert seal.verify_seal("test", root=fake_split)[0]
+    assert seal.verify_seal("test", root=fake_split, scenarios=scns)[0]
 
     (fake_split / "test_truth" / "test_001_dark" / "ground_truth.csv").write_text("X\n")
-    ok, problems = seal.verify_seal("test", root=fake_split)
+    ok, problems = seal.verify_seal("test", root=fake_split, scenarios=scns)
     assert not ok and problems
+
+
+def test_verify_seal_detects_spec_drift_even_when_every_file_is_intact(fake_split):
+    """The marker's spec_hash used to be written and never read, so a split
+    whose scenario DEFINITIONS had changed still verified clean as long as the
+    bytes on disk were untouched. Spec section 10 has the final evaluation
+    "verify the seal", so that weaker check would have been inherited by the
+    one run that must not be wrong."""
+    from benchmark.spec import scenarios
+    scns = scenarios.build_split("test")[:2]
+    seal.seal_split("test", scns, root=fake_split)
+
+    # Nothing on disk is touched; only the definitions we verify against.
+    drifted = scenarios.build_split("test")[:3]
+    ok, problems = seal.verify_seal("test", root=fake_split, scenarios=drifted)
+
+    assert not ok
+    assert any("spec drift" in p for p in problems), problems
 
 
 def test_sealing_twice_is_refused(fake_split):

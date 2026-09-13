@@ -6,7 +6,17 @@
 # Output (raw, wide, per-country) is written to raw_daily_wide.csv and then reshaped
 # into media.csv / sales.csv / ground_truth.csv by reformat.py (Python).
 #
-# Usage: Rscript generate_with_simmmulator.R
+# Usage: Rscript generate_with_simmmulator.R \
+#            [--seed N] [--config CONFIG] [--events EVENTS] [--outdir DIR]
+#
+#   --seed    integer RNG seed                      (default 42)
+#   --config  path to the simulation config         (default config.yaml)
+#   --events  path to the injected-pattern config   (default events_config.yaml)
+#   --outdir  directory for raw_daily_wide.csv      (default .)
+#
+# All four are optional and the defaults reproduce the original behaviour
+# exactly, so a bare `Rscript generate_with_simmmulator.R` is unchanged.
+# Parsing lives in cli_args.R so it can be tested without a simulation.
 
 library(siMMMulator)
 library(dplyr)

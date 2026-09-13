@@ -43,10 +43,24 @@ def truth_dir(split: str, sid: str, root: Path = DATASETS_DIR) -> Path:
 
 
 def _is_complete(split: str, sid: str, root: Path) -> bool:
+    """Both sides fully written -- the single definition of "generated".
+
+    scenario.json is required as well as ground_truth.csv and meta.json: it is
+    the ONLY machine-readable source of per-event magnitude (ground_truth.csv
+    leaves `multiplier` blank for every type but step_change, and meta.json
+    carries no magnitude at all), so spec section 9's magnitude and
+    near-zero-vs-exact-zero breakdowns cannot be produced without it. A run
+    that died between meta.json and scenario.json would otherwise be skipped
+    forever on retry, with scenario.json silently missing.
+
+    Sealing must use this check and not a weaker one: run_scenario writes the
+    data side before the truth side, so "media.csv exists" is satisfied by a
+    tree whose answers were never written.
+    """
     data, truth = dataset_dir(split, sid, root), truth_dir(split, sid, root)
     return (all((data / f).is_file() for f in DATA_FILES)
-            and (truth / "ground_truth.csv").is_file()
-            and (truth / "meta.json").is_file())
+            and all((truth / f).is_file()
+                    for f in ("ground_truth.csv", "meta.json", "scenario.json")))
 
 
 def run_scenario(scenario: Scenario, root: Path = DATASETS_DIR,

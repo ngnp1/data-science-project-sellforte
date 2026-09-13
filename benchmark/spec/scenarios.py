@@ -5,6 +5,20 @@ same code, build_all() always returns the same 100 scenarios -- that is what
 makes the sealed test split provable rather than merely asserted.
 
 Development scenarios draw seeds 1000-1999, test scenarios 5000-5999.
+
+OFF LIMITS TO DETECTOR DEVELOPMENT -- as off limits as `*_truth/`
+=================================================================
+This module is pure, deterministic and committed, so it *is* the answer key:
+`build_split("test")[5].events[0]` returns the complete ground truth of the
+sealed hold-out split, in one import, with no file to open. `detection/` must
+never import `benchmark.spec` any more than it may import `benchmark/eval/` or
+read a `*_truth/` directory, and a human or agent developing detectors must not
+read this file, run it, or ask another agent what it contains.
+
+That guarantee is PROCEDURAL, NOT CRYPTOGRAPHIC. The seal proves the data has
+not CHANGED since it was frozen. It does not prove -- and cannot prove -- that
+nobody LOOKED. Nothing here stops a reader; the discipline is the control, and
+saying so plainly is more useful than a claim the mechanism does not support.
 """
 from __future__ import annotations
 
@@ -308,6 +322,12 @@ def _events_edge(rng, countries, channels, n_days, case):
         out += ev.dark(c0, 300, 42, n_days)
         return out
     if case == "intermittent_channel":
+        # The hardcoded day 400 is safe only because the edge family draws 2-3
+        # countries (see _shape), so n_countries < 8, so years == 2 and
+        # n_days == 730. If the edge family ever drew 8 countries it would fall
+        # to a 1-year, 365-day series and `ev.holdout(..., 400, 42, ...)` would
+        # raise mid-generation for a window past the end of the series -- after
+        # the run had already spent time on earlier scenarios.
         return (ev.intermittent(c0, ch0, n=20, off_len=3, period=14, start=30,
                                 n_days=n_days)
                 + ev.holdout(c0, ch1, 400, 42, 0, n_days))

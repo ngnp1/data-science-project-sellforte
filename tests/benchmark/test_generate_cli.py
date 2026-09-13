@@ -11,21 +11,27 @@ def _run(venv_python, project_root, *args):
     )
 
 
+def _fake_scenario_files(root, split, s):
+    """Every file runner._is_complete requires, for one scenario."""
+    data = root / split / s.sid
+    truth = root / f"{split}_truth" / s.sid
+    data.mkdir(parents=True, exist_ok=True)
+    truth.mkdir(parents=True, exist_ok=True)
+    (data / "media.csv").write_text("date,country,channel,spend\n")
+    (data / "sales.csv").write_text("date,country,sales\n")
+    (truth / "ground_truth.csv").write_text("pattern_id\n")
+    (truth / "meta.json").write_text("{}")
+    (truth / "scenario.json").write_text("{}")
+
+
 def _fake_split(root, split):
     """Write minimal, complete-looking outputs for every scenario in a split
     without invoking R -- exactly the files runner._is_complete and
-    generate._missing_scenarios check for. Cheap: ~4 tiny files per
+    generate._missing_scenarios check for. Cheap: ~5 tiny files per
     scenario, no subprocess."""
     sp_scns = scenarios.build_split(split)
     for s in sp_scns:
-        data = root / split / s.sid
-        truth = root / f"{split}_truth" / s.sid
-        data.mkdir(parents=True, exist_ok=True)
-        truth.mkdir(parents=True, exist_ok=True)
-        (data / "media.csv").write_text("date,country,channel,spend\n")
-        (data / "sales.csv").write_text("date,country,sales\n")
-        (truth / "ground_truth.csv").write_text("pattern_id\n")
-        (truth / "meta.json").write_text("{}")
+        _fake_scenario_files(root, split, s)
     return sp_scns
 
 
@@ -74,14 +80,7 @@ def test_seal_refuses_an_incomplete_split_and_names_how_many_are_missing(
     all_dev = scenarios.build_split("dev")
     limited = all_dev[:3]
     for s in limited:
-        data = tmp_path / "dev" / s.sid
-        truth = tmp_path / "dev_truth" / s.sid
-        data.mkdir(parents=True, exist_ok=True)
-        truth.mkdir(parents=True, exist_ok=True)
-        (data / "media.csv").write_text("x\n")
-        (data / "sales.csv").write_text("x\n")
-        (truth / "ground_truth.csv").write_text("x\n")
-        (truth / "meta.json").write_text("{}")
+        _fake_scenario_files(tmp_path, "dev", s)
 
     proc = _run(venv_python, project_root, "--split", "dev", "--limit", "3",
                 "--seal", "--workers", "1", "--root", str(tmp_path))
@@ -175,3 +174,47 @@ def test_plan_scales_with_channel_count_not_just_country_years():
     assert seconds_pricey > seconds_cheap * 10
     assert seconds_cheap == generate.COST_PER_COUNTRY_YEAR[2]
     assert seconds_pricey == generate.COST_PER_COUNTRY_YEAR[12]
+
+
+# --- --seal / --seal-only must not run against --split all -----------------
+#
+# --split defaults to "all". A bare `--seal` would therefore seal the DEV
+# split -- which the whole iteration protocol requires to stay writable --
+# and then raise an unhandled RuntimeError on the already-sealed test split,
+# with dev already sealed by the time it did.
+
+def test_seal_refuses_split_all(venv_python, project_root, tmp_path):
+    proc = _run(venv_python, project_root, "--split", "all", "--seal",
+                "--root", str(tmp_path))
+    assert proc.returncode == 2
+    combined = proc.stdout + proc.stderr
+    assert "--seal" in combined and "explicit --split" in combined
+    assert not (tmp_path / "dev" / "SEALED").is_file()
+
+
+def test_seal_only_refuses_split_all(venv_python, project_root, tmp_path):
+    _fake_split(tmp_path, "dev")
+    proc = _run(venv_python, project_root, "--seal-only", "--root", str(tmp_path))
+    assert proc.returncode == 2
+    combined = proc.stdout + proc.stderr
+    assert "--seal-only" in combined and "explicit --split" in combined
+    assert not (tmp_path / "dev" / "SEALED").is_file()
+
+
+# --- completeness is runner._is_complete, not "media.csv exists" -----------
+
+def test_seal_only_refuses_a_split_whose_truth_side_is_missing(
+        venv_python, project_root, tmp_path):
+    """run_scenario writes the data side before the truth side, so a crash
+    between the two leaves media.csv/sales.csv on disk with no answers. The
+    old media.csv-only check would have sealed that."""
+    _fake_split(tmp_path, "dev")
+    victim = scenarios.build_split("dev")[7]
+    (tmp_path / "dev_truth" / victim.sid / "scenario.json").unlink()
+
+    proc = _run(venv_python, project_root, "--split", "dev", "--seal-only",
+                "--root", str(tmp_path))
+
+    assert proc.returncode != 0
+    assert "not generated" in (proc.stdout + proc.stderr)
+    assert not (tmp_path / "dev" / "SEALED").is_file()

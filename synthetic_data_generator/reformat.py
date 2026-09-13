@@ -8,7 +8,16 @@ from config.yaml, the same file generate_with_simmmulator.R reads -- one
 source of truth for both languages.
 
 Usage:
-    python reformat.py
+    python reformat.py [--config CONFIG] [--events EVENTS] [--outdir DIR]
+
+    --config  path to the simulation config        (default: config.yaml)
+    --events  path to the injected-pattern config  (default: events_config.yaml)
+    --outdir  directory holding raw_daily_wide.csv, and where media.csv,
+              sales.csv, ground_truth.csv and true_roi.csv are written
+              (default: .)
+
+The defaults reproduce the original behaviour exactly, so a bare
+`python reformat.py` in the generator directory is unchanged.
 """
 
 import argparse

@@ -2,9 +2,19 @@
 
 A sealed split carries a manifest.sha256 over every file on both the data and
 truth sides, plus a SEALED marker recording when it was sealed and the hash of
-the scenario definitions it was built from. Regenerating the split with any
-parameter changed produces a different spec_hash; editing any file produces a
-different manifest. Both are detectable by verify_seal().
+the scenario definitions it was built from. Editing any file produces a
+different manifest; regenerating the split with any parameter changed produces
+a different spec_hash. `verify_seal()` checks BOTH: the manifests file by file,
+and the recorded spec_hash against the scenario definitions the current code
+produces. Spec drift used to be undetectable here -- the marker carried the
+hash but nothing compared it -- while spec section 10 has the final evaluation
+"verify the seal", so that gap would have been inherited by the run that
+matters most.
+
+What the seal does NOT prove: that nobody read the answers. It is a tamper
+record, not an access control. The black-box guarantee is procedural (see
+`benchmark/spec/scenarios.py` and BENCHMARK.md), and no hash can substitute
+for it.
 """
 from __future__ import annotations
 
@@ -14,7 +24,7 @@ import json
 from pathlib import Path
 
 from benchmark.harness.runner import DATASETS_DIR
-from benchmark.spec.scenarios import Scenario, spec_hash
+from benchmark.spec.scenarios import Scenario, build_split, spec_hash
 
 MANIFEST_NAME = "manifest.sha256"
 SEAL_NAME = "SEALED"
@@ -99,7 +109,19 @@ def is_sealed(split: str, root: Path = DATASETS_DIR) -> bool:
     return (Path(root) / split / SEAL_NAME).is_file()
 
 
-def verify_seal(split: str, root: Path = DATASETS_DIR) -> tuple[bool, list[str]]:
+def verify_seal(split: str, root: Path = DATASETS_DIR,
+                scenarios: list[Scenario] | None = None) -> tuple[bool, list[str]]:
+    """Check a sealed split against BOTH things the seal records.
+
+    1. the manifests -- every file present, and unchanged byte for byte;
+    2. the spec_hash in the SEALED marker, against the scenario definitions
+       the current `benchmark/spec/` code produces.
+
+    (2) is what catches spec drift: data that still matches its manifest but
+    was built from a definition the repo no longer agrees with. Pass
+    `scenarios` explicitly when the sealed tree was built from a subset (the
+    tests do); by default the full split is rebuilt from the spec.
+    """
     root = Path(root)
     if not is_sealed(split, root):
         return False, [f"{split} is not sealed"]
@@ -109,4 +131,17 @@ def verify_seal(split: str, root: Path = DATASETS_DIR) -> tuple[bool, list[str]]
         ok, found = verify_manifest(directory)
         if not ok:
             problems += [f"{directory.name}: {p}" for p in found]
+
+    marker = Path(root) / split / SEAL_NAME
+    try:
+        recorded = json.loads(marker.read_text()).get("spec_hash")
+    except (OSError, ValueError) as exc:
+        problems.append(f"{SEAL_NAME}: unreadable ({type(exc).__name__}: {exc})")
+    else:
+        current = spec_hash(build_split(split) if scenarios is None else scenarios)
+        if recorded != current:
+            problems.append(
+                f"spec drift: {SEAL_NAME} records spec_hash {recorded}, but the "
+                f"current scenario definitions hash to {current}")
+
     return not problems, problems

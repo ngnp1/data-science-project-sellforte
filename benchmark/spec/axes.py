@@ -170,9 +170,17 @@ def pick_channels(rng: np.random.Generator, n: int) -> list[dict]:
     # component is first floored to at least 0.15/n of the total (mixing in a
     # uniform share while keeping the weights summing to 1), *then* scaled so
     # the first n-1 channels claim at most 80% of the budget. That keeps every
-    # min/max pair ordered and the sum of maxima safely under the 0.92
-    # headroom limit for every n up to 12 (verified by simulation, worst case
-    # ~0.91).
+    # min/max pair ordered and the sum of maxima under the 0.92 headroom limit
+    # for every n up to 12 -- not empirically, but by construction:
+    #
+    #     sum(maxima) = 1.15 * 0.80 * (1 - raw_n) = 0.92 * (1 - raw_n)
+    #
+    # where raw_n is the LAST channel's floored weight, and raw_n >= 0.15/n > 0
+    # by the flooring step above. So the bound is 0.92 * (1 - 0.15/n), i.e.
+    # 0.9085 at n = 12 and tighter for smaller n -- strictly under 0.92 for
+    # every n. Stated as a closed form on purpose: it is what tells a future
+    # edit to the 0.15 floor or the 0.80 scale whether it has broken the
+    # generator contract, which a simulation result cannot.
     raw = rng.dirichlet(np.ones(n))
     floor = 0.15 / n
     raw = raw * (1 - n * floor) + floor
