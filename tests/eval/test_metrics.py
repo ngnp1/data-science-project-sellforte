@@ -159,3 +159,90 @@ def test_evaluate_scenario_returns_every_metric_family():
     for key in ["event_level", "per_type", "iou", "boundary",
                 "accuracy", "day_level", "confusion"]:
         assert key in got
+
+
+def test_reliability_curve_uses_identity_not_equality_to_credit_matches():
+    """Two Events equal in content but distinct objects must not both be
+    credited when only one of them can match under one-to-one assignment.
+    A structural-equality-based matched set would wrongly credit both and
+    report empirical_precision == 1.0 instead of 0.5."""
+    t = [e("2024-03-01", "2024-03-10")]
+    base = e("2024-03-01", "2024-03-10")
+    p1 = Event(**{**base.__dict__, "detection_confidence": 0.9})
+    p2 = Event(**{**base.__dict__, "detection_confidence": 0.9})
+    assert p1 == p2 and p1 is not p2
+
+    curve = M.reliability_curve(t, [p1, p2], n_bins=10)
+    assert len(curve) == 1
+    assert curve[0]["n"] == 2
+    assert curve[0]["empirical_precision"] == 0.5
+
+
+def test_reliability_curve_counts_every_bin_boundary_confidence():
+    """Confidences sitting exactly on bin edges -- 0.0, an internal boundary,
+    and 1.0 -- must all be counted somewhere. The last bin is closed on the
+    right specifically so a confidence of 1.0 is not silently dropped."""
+    t = [e("2024-03-01", "2024-03-10")]
+    pred = [
+        Event(**{**e("2024-04-01", "2024-04-10").__dict__,
+                 "detection_confidence": 0.0}),
+        Event(**{**e("2024-05-01", "2024-05-10").__dict__,
+                 "detection_confidence": 0.5}),
+        Event(**{**e("2024-06-01", "2024-06-10").__dict__,
+                 "detection_confidence": 1.0}),
+    ]
+    curve = M.reliability_curve(t, pred, n_bins=10)
+    assert sum(b["n"] for b in curve) == len(pred)
+
+
+def test_operating_curve_keeps_unscored_predictions_at_every_cut():
+    """Opposite of reliability_curve's null rule: an unscored detection must
+    survive every confidence cut rather than vanishing, so a detector that
+    never scores anything still produces a meaningful curve instead of one
+    that empties out at the first threshold."""
+    t = [e("2024-03-01", "2024-03-10")]
+    p = [e("2024-03-01", "2024-03-10")]  # detection_confidence is None
+    curve = M.operating_curve(t, p, cuts=[0.0, 0.5, 0.9, 1.0])
+    assert all(c["n_pred"] == 1 for c in curve)
+
+
+def test_day_level_and_event_level_diverge_on_split_predictions():
+    """Two adjacent predictions covering one truth interval score perfectly
+    at day level but not at strict event level, pinning the contrast that
+    justifies having a day-level metric at all."""
+    t = [e("2024-03-01", "2024-03-20")]
+    p = [e("2024-03-01", "2024-03-10"), e("2024-03-11", "2024-03-20")]
+
+    day = M.day_level(t, p)
+    assert day["precision"] == 1.0 and day["recall"] == 1.0
+
+    event = M.event_level(t, p)
+    assert event["precision"] < 1.0 or event["recall"] < 1.0
+
+
+def test_relaxed_match_is_what_makes_channel_error_visible():
+    """Under strict matching a channel mix-up is invisible as a channel
+    error -- it collapses into a false negative plus a false positive.
+    Pinning both sides together so a refactor can't silently lose the
+    contrast that makes channel accuracy meaningful."""
+    t = [e("2024-03-01", "2024-03-10", channel="TV")]
+    p = [e("2024-03-01", "2024-03-10", channel="Radio")]
+
+    strict = match_events(t, p, strict=True)
+    assert strict.n_tp == 0 and strict.n_fp == 1 and strict.n_fn == 1
+
+    got = M.channel_and_market_accuracy(t, p)
+    assert got["channel_accuracy"] == 0.0
+    assert got["market_accuracy"] == 1.0
+
+
+def test_operating_curve_default_sweep_reaches_one_and_has_21_points():
+    """The default cut sweep must include 1.0 -- np.arange's half-open end
+    would otherwise silently drop the strictest cut from a curve that goes
+    straight into the project's report."""
+    t = [e("2024-03-01", "2024-03-10")]
+    p = [Event(**{**e("2024-03-01", "2024-03-10").__dict__,
+                  "detection_confidence": 0.9})]
+    curve = M.operating_curve(t, p)
+    assert len(curve) == 21
+    assert curve[-1]["cut"] == 1.0

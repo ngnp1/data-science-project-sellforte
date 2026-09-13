@@ -159,7 +159,10 @@ def operating_curve(truth: list[Event], pred: list[Event],
     detector has a single fixed accuracy.
     """
     if cuts is None:
-        cuts = [round(c, 2) for c in np.arange(0.0, 1.0, 0.05)]
+        # np.arange's end is half-open, so the sweep must reach 1.0 via
+        # linspace instead -- otherwise the strictest cut is silently
+        # dropped from a curve that goes straight into the report.
+        cuts = [round(c, 2) for c in np.linspace(0.0, 1.0, 21)]
 
     out = []
     for cut in cuts:
