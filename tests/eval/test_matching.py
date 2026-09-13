@@ -89,12 +89,38 @@ def test_empty_inputs_are_handled():
 
 
 def test_matching_is_deterministic_regardless_of_input_order():
+    """Determinism test with two parts: non-contending pairs and tied IoU."""
+    # Part 1: Two disjoint truth/pred pairs (no contention).
     t = [e("2024-03-01", "2024-03-10"), e("2024-06-01", "2024-06-10")]
     p = [e("2024-06-01", "2024-06-10"), e("2024-03-01", "2024-03-10")]
     a = match_events(t, p)
     b = match_events(list(reversed(t)), list(reversed(p)))
     assert sorted(m.truth.start for m in a.matches) == \
            sorted(m.truth.start for m in b.matches)
+
+    # Part 2: Tied IoU values must resolve identically regardless of input order.
+    # Reviewer's reproduction case: truth [Jan 1..10] vs two predictions that
+    # both score IoU 0.5: [Jan 1..5] and [Jan 6..10]. Must match the same one.
+    t_contention = [e("2024-03-01", "2024-03-10")]
+    p1 = e("2024-03-01", "2024-03-05")  # IoU = 5 / 10 = 0.5
+    p2 = e("2024-03-06", "2024-03-10")  # IoU = 5 / 10 = 0.5
+
+    res_p1_first = match_events(t_contention, [p1, p2])
+    res_p2_first = match_events(t_contention, [p2, p1])
+
+    # Both should match exactly one pair
+    assert len(res_p1_first.matches) == 1
+    assert len(res_p2_first.matches) == 1
+
+    # Same prediction must be credited in both orderings (deterministic)
+    assert res_p1_first.matches[0].pred.start == res_p2_first.matches[0].pred.start
+    assert res_p1_first.matches[0].pred.end == res_p2_first.matches[0].pred.end
+
+    # Also test with both lists reversed
+    res_reversed_both = match_events(list(reversed(t_contention)), [p2, p1])
+    assert len(res_reversed_both.matches) == 1
+    assert res_p1_first.matches[0].pred.start == res_reversed_both.matches[0].pred.start
+    assert res_p1_first.matches[0].pred.end == res_reversed_both.matches[0].pred.end
 
 
 def test_events_from_different_scenarios_never_match():
