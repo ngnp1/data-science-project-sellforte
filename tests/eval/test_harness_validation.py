@@ -32,6 +32,20 @@ def test_perfect_oracle_scores_exactly_one(sid):
     assert got["f1"] == 1.0, sid
 
 
+@pytest.mark.parametrize("sid", DEV_WITH_EVENTS)
+def test_perfect_oracle_iou_is_exactly_one(sid):
+    """Pins mean_iou and median_iou to an ABSOLUTE 1.0, not merely a relative
+    ordering -- no other test in this file checks an absolute IoU value, which
+    is exactly what let `mean_iou`/`median_iou` be hardcoded to 1.0, or let
+    `overlap_days` silently drop its inclusive +1 (which degrades every
+    event's IoU from 1.0 to roughly 0.667, still above the 0.5 match
+    threshold so precision/recall don't notice), and still pass every other
+    test in this file."""
+    got = score(sid, D.perfect_oracle)["iou"]
+    assert got["mean_iou"] == 1.0, sid
+    assert got["median_iou"] == 1.0, sid
+
+
 def test_perfect_oracle_scores_one_on_pulse_scenarios_specifically():
     """Called out separately because ungrouped pulse truth is the documented
     trap: a perfect detector would score zero on a third of the test events."""
@@ -96,6 +110,34 @@ def test_shifted_oracle_shows_up_in_boundary_error():
     sid = DEV_WITH_EVENTS[0]
     got = score(sid, D.shifted_oracle(3))["boundary"]
     assert got["start_median"] == 3.0
+
+
+def test_shifted_oracle_iou_matches_the_closed_form():
+    """Pins the shifted oracle's IoU to its exact closed form, not just a
+    relative ordering: `test_shifted_oracle_degrades_iou_monotonically` only
+    asserts `got <= base`, which a hardcoded or otherwise broken `iou_stats`
+    can satisfy by breaking both sides identically.
+
+    For an interval of n days shifted by d days, the overlap is (n - d) days
+    and the union is (n + d) days, so IoU is exactly (n - d) / (n + d).
+
+    Shift of 2 days is used against DEV_WITH_EVENTS[0] (dev_005), whose only
+    truth event is 14 days long: (14 - 2) / (14 + 2) = 0.75, comfortably above
+    the 0.5 match threshold (this event tolerates a shift up to about 4 days
+    before dropping below it), so every event still matches and the reported
+    mean_iou is exactly the closed-form value -- verified, not assumed, by the
+    assertion just below the expected-value computation.
+    """
+    sid = DEV_WITH_EVENTS[0]
+    shift = 2
+    truth = T.load_truth("dev", sid)
+    expected_per_event = [(e.n_days - shift) / (e.n_days + shift) for e in truth]
+    assert all(v >= 0.5 for v in expected_per_event), \
+        "shift too large for this fixture -- some truth event would not match"
+    expected_mean = sum(expected_per_event) / len(expected_per_event)
+
+    got = score(sid, D.shifted_oracle(shift))["iou"]["mean_iou"]
+    assert got == pytest.approx(expected_mean, abs=1e-9)
 
 
 def test_perfect_oracle_produces_a_perfectly_calibrated_reliability_curve():
