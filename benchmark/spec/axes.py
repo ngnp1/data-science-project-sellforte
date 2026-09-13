@@ -116,7 +116,28 @@ def pick_countries(rng: np.random.Generator, n: int, spread: str) -> list[dict]:
 
 
 def pick_channels(rng: np.random.Generator, n: int) -> list[dict]:
-    """Choose n distinct channels and give them valid spend shares.
+    """Choose n distinct channels, ordered impressions-then-clicks, and give
+    them valid spend shares.
+
+    Ordering guarantee: generate_with_simmmulator.R does not use file order to
+    decide which channel is exempt from spend shares. It regroups
+    config$channels by type first --
+
+        impression_channels <- Filter(function(ch) ch$type == "impression", ...)
+        click_channels      <- Filter(function(ch) ch$type == "click", ...)
+        channels_ordered    <- c(impression_channels, click_channels)
+        all_but_last        <- channels_ordered[-length(channels_ordered)]
+
+    -- so "the last channel" (the one with no spend_share_min/max) is the last
+    one *after* that impressions-then-clicks regrouping, not the last one in
+    file order. This function therefore returns channels pre-sorted the same
+    way (impressions first, clicks last, stable within each group) and
+    assigns spend_share_min/max to every channel except the true last one in
+    that order. Python and R then agree on which channel is exempt by
+    construction instead of by chance -- a random draw order previously let
+    the "last drawn" channel be of either type, and whenever that didn't match
+    R's "last after regrouping" channel, R's MAX_MIN_PROPORTION vector came up
+    short and step_2_ads_spend aborted.
 
     The generator requires spend_share_min/max on every channel except the last,
     which receives whatever budget remains. The maxima must therefore leave
@@ -137,6 +158,11 @@ def pick_channels(rng: np.random.Generator, n: int) -> list[dict]:
 
     if n == 1:
         return chosen
+
+    # Impressions first, clicks last -- stable sort preserves the random
+    # draw's relative order within each group. Matches the regrouping
+    # generate_with_simmmulator.R performs before picking "the last channel".
+    chosen = sorted(chosen, key=lambda ch: ch["type"] != "impression")
 
     # Dirichlet gives a random but sane budget split. A plain Dirichlet(1,...)
     # draw can hand a channel a near-zero share, which would make

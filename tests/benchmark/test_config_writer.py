@@ -1,5 +1,7 @@
+import dataclasses
 import subprocess
 
+import pytest
 import yaml
 
 from benchmark.harness.config_writer import write_scenario_configs
@@ -59,3 +61,72 @@ def test_r_can_actually_read_the_generated_config(tmp_path):
     assert int(n_countries) == s.meta["n_countries"]
     assert int(n_channels) == s.meta["n_channels"]
     assert int(n_events) == len(s.events)
+
+
+def _max_min_proportion(channels):
+    """Replay generate_with_simmmulator.R's exact regrouping logic (lines
+    53-58 and 76-79 of generate_with_simmmulator.R) in Python: split channels
+    into impression-type and click-type, concatenate impressions first, drop
+    the last element of THAT order, then flatten (spend_share_min,
+    spend_share_max) pairs from what remains -- exactly what R's
+    MAX_MIN_PROPORTION vector is built from."""
+    impression_channels = [c for c in channels if c["type"] == "impression"]
+    click_channels = [c for c in channels if c["type"] == "click"]
+    channels_ordered = impression_channels + click_channels
+    all_but_last = channels_ordered[:-1]
+    values = []
+    for ch in all_but_last:
+        values.append(ch.get("spend_share_min"))
+        values.append(ch.get("spend_share_max"))
+    return values
+
+
+def test_max_min_proportion_vector_matches_r_for_every_scenario():
+    """This is the test that would have caught the channel-ordering defect:
+    for every one of the 100 frozen scenarios, replay R's exact regrouping
+    logic and assert the resulting MAX_MIN_PROPORTION vector has length
+    2*n_channels - 2 with no missing values. Before the fix to
+    axes.pick_channels, 49 of 100 scenarios produced a short vector here
+    because R's "last channel after impressions-then-clicks regrouping"
+    didn't match Python's "last channel drawn"."""
+    all_scenarios = scenarios.build_all()
+    assert len(all_scenarios) == 100
+    for s in all_scenarios:
+        n = len(s.channels)
+        values = _max_min_proportion(s.channels)
+        assert len(values) == 2 * n - 2, \
+            f"{s.sid}: MAX_MIN_PROPORTION length {len(values)} != {2 * n - 2}"
+        assert all(v is not None for v in values), \
+            f"{s.sid}: MAX_MIN_PROPORTION has a missing value"
+
+
+@pytest.mark.slow
+def test_generator_accepts_the_fixed_channel_ordering(tmp_path, generator_dir):
+    """dev_006_dark was one of the 49 scenarios broken by the channel-ordering
+    defect in axes.pick_channels: R's regrouped "last channel" (last after
+    sorting impressions-then-clicks) didn't match Python's "last drawn"
+    channel, so R's MAX_MIN_PROPORTION vector came up short and
+    step_2_ads_spend aborted mid-run. Unlike
+    test_r_can_actually_read_the_generated_config above -- which only proves
+    R can parse the YAML dialect, and passed on this exact scenario even
+    while it was fatally broken -- this test runs the real simulator
+    end-to-end and proves siMMMulator actually accepts the channel contract
+    we emit.
+
+    Reduced to one country and one year (keeping the scenario's own channel
+    list, which is what is under test) to keep the run to roughly 25
+    seconds."""
+    s = next(x for x in scenarios.build_all() if x.sid == "dev_006_dark")
+    minimal = dataclasses.replace(s, countries=(s.countries[0],), years=1)
+
+    cfg_path, ev_path = write_scenario_configs(minimal, tmp_path)
+    outdir = tmp_path / "out"
+
+    proc = subprocess.run(
+        ["Rscript", str(generator_dir / "generate_with_simmmulator.R"),
+         "--seed", str(minimal.seed), "--config", str(cfg_path),
+         "--events", str(ev_path), "--outdir", str(outdir)],
+        capture_output=True, text=True, timeout=300,
+    )
+    assert proc.returncode == 0, proc.stdout + "\n" + proc.stderr
+    assert (outdir / "raw_daily_wide.csv").is_file()

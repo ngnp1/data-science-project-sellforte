@@ -59,6 +59,24 @@ def test_pick_channels_is_deterministic_for_a_given_seed():
     assert axes.pick_channels(rng(5), 6) == axes.pick_channels(rng(5), 6)
 
 
+@pytest.mark.parametrize("n", [2, 4, 6, 9, 12])
+def test_pick_channels_orders_impressions_before_clicks(n):
+    """generate_with_simmmulator.R regroups channels into impressions-then-
+    clicks before deciding which one is exempt from spend shares -- so the
+    list we hand it must already be in that order, and the exemption must
+    land on the true last element of that order, not of the random draw."""
+    got = axes.pick_channels(rng(3), n)
+    types = [c["type"] for c in got]
+    assert types == sorted(types, key=lambda t: t != "impression"), \
+        "channels are not ordered impressions-then-clicks"
+
+    for ch in got[:-1]:
+        assert "spend_share_min" in ch and "spend_share_max" in ch, \
+            f"{ch['name']} is missing spend shares but is not the last channel"
+    assert "spend_share_min" not in got[-1] and "spend_share_max" not in got[-1], \
+        f"the last channel ({got[-1]['name']}) should have no spend shares"
+
+
 def test_noise_presets_increase_monotonically():
     lo, med, hi = (axes.NOISE_PRESETS[k] for k in ["low", "med", "high"])
     assert lo["error_std"] < med["error_std"] < hi["error_std"]
