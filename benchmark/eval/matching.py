@@ -73,6 +73,11 @@ def match_events(truth: list[Event], pred: list[Event], *,
                  min_iou: float = 0.5, strict: bool = True) -> MatchResult:
     """One-to-one assignment, best IoU first.
 
+    Greedy matching by descending temporal IoU. Ties on IoU are broken by
+    prediction event content (start, end, country_code, channel, event_type),
+    then truth event content, ensuring deterministic results regardless of
+    input order.
+
     `strict=False` ignores country, channel and type, which is what spec
     section 9 item 4 needs: under the strict match a channel mix-up vanishes
     into a false negative plus a false positive and channel accuracy reads a
@@ -85,21 +90,27 @@ def match_events(truth: list[Event], pred: list[Event], *,
                 continue
             score = iou(t, p)
             if score >= min_iou:
-                candidates.append((score, ti, pi))
+                candidates.append((score, t, p, ti, pi))
 
-    # Sort by descending IoU, then by index so ties resolve deterministically
-    # regardless of the order the caller supplied.
-    candidates.sort(key=lambda c: (-c[0], c[1], c[2]))
+    # Sort by descending IoU, then by prediction and truth content for
+    # deterministic tie-breaking regardless of caller's input order.
+    def sort_key(c):
+        score, t, p, ti, pi = c
+        return (-score, p.start, p.end, p.country_code or "", p.channel or "",
+                p.event_type or "", t.start, t.end, t.country_code or "",
+                t.channel or "", t.event_type or "")
+
+    candidates.sort(key=sort_key)
 
     used_t: set[int] = set()
     used_p: set[int] = set()
     result = MatchResult()
-    for score, ti, pi in candidates:
+    for score, t, p, ti, pi in candidates:
         if ti in used_t or pi in used_p:
             continue
         used_t.add(ti)
         used_p.add(pi)
-        result.matches.append(Match(truth=truth[ti], pred=pred[pi], iou=score))
+        result.matches.append(Match(truth=t, pred=p, iou=score))
 
     result.unmatched_truth = [t for i, t in enumerate(truth) if i not in used_t]
     result.unmatched_pred = [p for i, p in enumerate(pred) if i not in used_p]
