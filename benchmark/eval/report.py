@@ -8,6 +8,21 @@ def _pct(x: float) -> str:
     return f"{x:.3f}"
 
 
+def _is_degenerate(m: dict) -> bool:
+    """True when a breakdown row has no TP, FP, or FN at all -- e.g. a `null`
+    family bucket, which has no truth events and (correctly) no predictions.
+    `metrics.prf` reports 0.0/0.0/0.0 for that case by its own frozen
+    convention, but rendering it as `0.000` reads as total failure on exactly
+    the bucket where the detector is behaving perfectly. Presentational only:
+    the underlying dict still carries the real zeros for anything downstream
+    that aggregates n_tp/n_fp/n_fn."""
+    return m["n_tp"] + m["n_fp"] + m["n_fn"] == 0
+
+
+def _rate_cell(m: dict, key: str) -> str:
+    return "n/a" if _is_degenerate(m) else _pct(m[key])
+
+
 def render_markdown(results: dict) -> str:
     o = results["overall"]
     lines = [
@@ -94,8 +109,8 @@ def render_markdown(results: dict) -> str:
         for value, m in sorted((k, v) for k, v in data.items()
                                if k != "_warning"):
             lines.append(
-                f"| {value} | {m['n_scenarios']} | {_pct(m['precision'])} "
-                f"| {_pct(m['recall'])} | {_pct(m['f1'])} |")
+                f"| {value} | {m['n_scenarios']} | {_rate_cell(m, 'precision')} "
+                f"| {_rate_cell(m, 'recall')} | {_rate_cell(m, 'f1')} |")
         lines.append("")
 
     return "\n".join(lines)
