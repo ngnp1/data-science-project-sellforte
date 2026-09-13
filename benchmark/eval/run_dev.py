@@ -55,7 +55,11 @@ def main(argv=None) -> int:
     p.add_argument("--out", default=None, help="write the Markdown report here")
     p.add_argument("--load-data", action="store_true",
                    help="pass media/sales frames to the detector")
+    p.add_argument("--history", default=None,
+                   help="path to the dev history JSONL "
+                        f"(default: {HISTORY})")
     args = p.parse_args(argv)
+    history_path = Path(args.history) if args.history else HISTORY
 
     detector = load_detector(args.detector)
     sids = T.list_scenarios("dev")
@@ -81,10 +85,11 @@ def main(argv=None) -> int:
                     "f1": o["f1"], "mean_iou": results["iou"]["mean_iou"],
                     "null_fp_rate": results["null_fp_rate"]},
     }
-    with HISTORY.open("a") as f:
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    with history_path.open("a") as f:
         f.write(json.dumps(record, sort_keys=True) + "\n")
 
-    print(f"\nAppended to {HISTORY.name} "
+    print(f"\nAppended to {history_path.name} "
           f"(f1={o['f1']:.3f}, label={args.label or '-'})")
     return 0
 
