@@ -341,7 +341,11 @@ def build_split(split: str) -> list[Scenario]:
         for i in range(n):
             seed = base + counter
             counter += 1
-            sid = f"{split}_{counter:03d}_{family}"
+            # No family suffix: the sid becomes a dataset directory name on the
+            # detector side, and spec section 4 requires those to hide generation
+            # parameters. `test_001_null` would announce "this scenario contains
+            # no events" in the one place a detector is allowed to look.
+            sid = f"{split}_{counter:03d}"
             rng = np.random.default_rng(seed)
 
             if family == "edge":

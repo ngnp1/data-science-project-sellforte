@@ -102,7 +102,7 @@ def test_max_min_proportion_vector_matches_r_for_every_scenario():
 
 @pytest.mark.slow
 def test_generator_accepts_the_fixed_channel_ordering(tmp_path, generator_dir):
-    """dev_006_dark was one of the 49 scenarios broken by the channel-ordering
+    """dev_006 was one of the 49 scenarios broken by the channel-ordering
     defect in axes.pick_channels: R's regrouped "last channel" (last after
     sorting impressions-then-clicks) didn't match Python's "last drawn"
     channel, so R's MAX_MIN_PROPORTION vector came up short and
@@ -116,7 +116,7 @@ def test_generator_accepts_the_fixed_channel_ordering(tmp_path, generator_dir):
     Reduced to one country and one year (keeping the scenario's own channel
     list, which is what is under test) to keep the run to roughly 25
     seconds."""
-    s = next(x for x in scenarios.build_all() if x.sid == "dev_006_dark")
+    s = next(x for x in scenarios.build_all() if x.sid == "dev_006")
     minimal = dataclasses.replace(s, countries=(s.countries[0],), years=1)
 
     cfg_path, ev_path = write_scenario_configs(minimal, tmp_path)

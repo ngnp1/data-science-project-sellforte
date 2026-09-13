@@ -25,14 +25,14 @@ from benchmark.spec import scenarios
 
 @pytest.mark.slow
 def test_generator_succeeds_on_an_all_impression_scenario(tmp_path, generator_dir):
-    """dev_004_null is a real scenario from the frozen 100-scenario spec whose
+    """dev_004 is a real scenario from the frozen 100-scenario spec whose
     two channels (YouTube, Instagram) are both impression-type -- exactly the
     shape that used to crash the generator. Reduced to one country and one
     year (keeping the scenario's own 2-channel, all-impression composition,
     which is what is under test) so the run stays to roughly 4 seconds."""
-    s = next(x for x in scenarios.build_all() if x.sid == "dev_004_null")
+    s = next(x for x in scenarios.build_all() if x.sid == "dev_004")
     assert {ch["type"] for ch in s.channels} == {"impression"}, \
-        "dev_004_null is expected to be all-impression; spec may have changed"
+        "dev_004 is expected to be all-impression; spec may have changed"
 
     minimal = dataclasses.replace(s, countries=(s.countries[0],), years=1)
 
