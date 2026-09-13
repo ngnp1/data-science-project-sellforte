@@ -62,26 +62,44 @@ def _shape(rng, family, index, gindex):
     Stratified rather than independently sampled, so each family reliably spans
     all three noise levels instead of clustering by chance.
 
-    `index` counts within the family, `gindex` across the whole split. Noise and
-    trend are driven by the family-local counter while seasonality and market
-    spread are driven by the global one, so the axes stay decorrelated -- drive
-    them all off `index` and every high-noise scenario would also be an
-    extreme-spread scenario, which would make the breakdowns in spec section 9
-    uninterpretable.
+    `index` counts within the family, `gindex` across the whole split. Noise
+    stays keyed to the family-local counter (`index % 3`), so every family --
+    even ones with only 3-6 scenarios -- still cycles through all three noise
+    levels. Seasonality, market spread, and trend are each keyed to an
+    independent base-3 digit of the global counter `gindex` (`% 3`, `// 3 % 3`,
+    `// 9 % 3`) rather than to `index`: driving trend off the family-local
+    counter meant families smaller than 9 could never reach `index >= 6`, so
+    `trend_p == 1.0` only ever showed up on the two largest families (`mixed`,
+    `edge`) -- confounding "high trend" with "hardest family" in every
+    downstream breakdown. Keeping the three global axes on independent digits
+    of `gindex` (rather than reusing one another's stride, which would make two
+    of them identical) keeps them mutually decorrelated too.
     """
     noise_level = axes.NOISE_LEVELS[index % 3]
-    trend_p = axes.TREND_LEVELS[(index // 3) % 3]
     temp_var = axes.SEASONALITY_LEVELS[gindex % 3]
     spread = ("tight", "moderate", "extreme")[(gindex // 3) % 3]
+    trend_p = axes.TREND_LEVELS[(gindex // 9) % 3]
 
     if family == "cross_market":
         n_countries = int(rng.choice([3, 5, 8]))
     elif family == "edge":
         n_countries = int(rng.choice([2, 3]))
+    elif family == "launch":
+        # A staggered launch needs a comparison market, so at least 2.
+        n_countries = int(rng.choice([2, 3, 5, 8]))
+    elif family == "mixed":
+        # A country-level event needs a country to itself, so at least 2.
+        n_countries = int(rng.choice([2, 3, 5, 8]))
     else:
         n_countries = int(rng.choice([1, 2, 3, 5, 8]))
 
-    n_channels = int(rng.choice([2, 4, 6, 9, 12]))
+    if family == "mixed":
+        # Channel-level events sharing a country need distinct channels --
+        # up to 3 at once (holdout, step, pulse) -- so keep enough headroom.
+        n_channels = int(rng.choice([4, 6, 9, 12]))
+    else:
+        n_channels = int(rng.choice([2, 4, 6, 9, 12]))
+
     years = 1 if n_countries >= 8 else 2
     return noise_level, trend_p, temp_var, spread, n_countries, n_channels, years
 
@@ -169,17 +187,23 @@ def _events_pulse(rng, countries, channels, n_days):
     return ev.pulse(c, ch, [first + i * gap for i in range(n_pulses)], length, n_days)
 
 
+_LAUNCH_OFFSET_POOL = tuple(range(30, 30 + 15 * 12, 15))  # 30, 45, ..., 195
+
+
 def _events_launch(rng, countries, channels, n_days):
     ch = channels[int(rng.integers(len(channels)))]["name"]
     out = []
-    # Staggered: each market lights up at a different offset; at least one
-    # market carries the channel from day one, to act as the comparison group.
-    offsets = [0] + [int(rng.choice([45, 90, 150])) for _ in countries[1:]]
+    # Staggered: each market lights up on its own distinct offset (sampled
+    # without replacement, so two markets never launch on the same day); the
+    # first market keeps offset 0 and carries the channel from day one, to
+    # act as the comparison group. _shape excludes n_countries == 1 from this
+    # family, so there is always at least one other market to stagger.
+    offsets = [0] + [int(o) for o in
+                      rng.choice(_LAUNCH_OFFSET_POOL, size=len(countries) - 1,
+                                 replace=False)]
     for country, off in zip(countries, offsets):
         if off > 0:
             out += ev.launch(country["code"], ch, off, n_days)
-    if not out:  # single-market scenario, force one launch
-        out = ev.launch(countries[0]["code"], ch, 90, n_days)
     return out
 
 
@@ -191,15 +215,68 @@ def _events_cross_market(rng, countries, channels, n_days):
     return ev.holdout(c, ch, _pick_window(rng, n_days, length), length, 0, n_days)
 
 
+_MIXED_BUILDERS = [_events_dark, _events_single, _events_holdout,
+                   _events_step, _events_pulse]
+# dark_period and single_channel each claim their whole country (channel ==
+# "ALL", or every other channel goes to zero) -- nothing else may target that
+# country at all. holdout/step/pulse only claim one channel, so several of
+# them can share a country as long as they use different channels.
+_MIXED_COUNTRY_LEVEL = {_events_dark, _events_single}
+
+
 def _events_mixed(rng, countries, channels, n_days):
-    """Three to five simultaneous events of different kinds across markets."""
-    builders = [_events_dark, _events_single, _events_holdout,
-                _events_step, _events_pulse]
-    k = int(rng.integers(3, 6))
-    idx = rng.choice(len(builders), size=k, replace=False)
+    """Three to five simultaneous events of different kinds across markets.
+
+    Each event gets an exclusive slice of (country, channel) reserved before
+    any builder runs, so events can never contradict one another the way R
+    applies them in sequence -- e.g. a dark_period zeroing a country and a
+    step_change later multiplying that same (now-zero) channel, which would
+    leave ground truth listing an event with no visible trace in the data.
+    """
+    n_countries = len(countries)
+
+    # Country-level events need a country to themselves; any channel-level
+    # events need at least one country left over to share. Retry the
+    # count/kind draw until it packs into what's available -- with
+    # n_countries >= 2 (guaranteed by _shape for this family) a satisfiable
+    # combination always exists (e.g. k=3 with no country-level events).
+    while True:
+        k = int(rng.integers(3, 6))
+        idx = rng.choice(len(_MIXED_BUILDERS), size=k, replace=False)
+        chosen = [_MIXED_BUILDERS[i] for i in idx]
+        n_country_level = sum(1 for b in chosen if b in _MIXED_COUNTRY_LEVEL)
+        n_channel_level = k - n_country_level
+        slots_needed = n_country_level + (1 if n_channel_level else 0)
+        if slots_needed <= n_countries:
+            break
+
+    order = [int(i) for i in rng.permutation(n_countries)]
     out = []
-    for i in idx:
-        out += builders[i](rng, countries, channels, n_days)
+    slot = 0
+
+    # Country-level builders each claim one exclusive, never-shared country.
+    for b in chosen:
+        if b in _MIXED_COUNTRY_LEVEL:
+            out += b(rng, [countries[order[slot]]], channels, n_days)
+            slot += 1
+
+    # Channel-level builders round-robin across whatever countries are left,
+    # sharing only when there are more of them than remaining countries --
+    # and when they do share, each is handed only the channels its
+    # country-mates have not already claimed.
+    remaining = order[slot:]
+    used_channels_by_country = {c: set() for c in remaining}
+    channel_builders = [b for b in chosen if b not in _MIXED_COUNTRY_LEVEL]
+    for j, b in enumerate(channel_builders):
+        c_idx = remaining[j % len(remaining)]
+        avail = [ch for ch in channels
+                 if ch["name"] not in used_channels_by_country[c_idx]]
+        entries = b(rng, [countries[c_idx]], avail, n_days)
+        for e in entries:
+            if e["channel"] != "ALL":
+                used_channels_by_country[c_idx].add(e["channel"])
+        out += entries
+
     return out
 
 
