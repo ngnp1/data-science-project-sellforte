@@ -1,6 +1,7 @@
 import subprocess
 
-from benchmark.harness import generate
+from benchmark.harness import generate, seal
+from benchmark.spec import scenarios
 
 
 def _run(venv_python, project_root, *args):
@@ -8,6 +9,24 @@ def _run(venv_python, project_root, *args):
         [str(venv_python), "-m", "benchmark.harness.generate", *args],
         cwd=project_root, capture_output=True, text=True,
     )
+
+
+def _fake_split(root, split):
+    """Write minimal, complete-looking outputs for every scenario in a split
+    without invoking R -- exactly the files runner._is_complete and
+    generate._missing_scenarios check for. Cheap: ~4 tiny files per
+    scenario, no subprocess."""
+    sp_scns = scenarios.build_split(split)
+    for s in sp_scns:
+        data = root / split / s.sid
+        truth = root / f"{split}_truth" / s.sid
+        data.mkdir(parents=True, exist_ok=True)
+        truth.mkdir(parents=True, exist_ok=True)
+        (data / "media.csv").write_text("date,country,channel,spend\n")
+        (data / "sales.csv").write_text("date,country,sales\n")
+        (truth / "ground_truth.csv").write_text("pattern_id\n")
+        (truth / "meta.json").write_text("{}")
+    return sp_scns
 
 
 def test_dry_run_reports_the_plan_without_generating(venv_python, project_root):
@@ -32,6 +51,73 @@ def test_seal_only_on_an_ungenerated_split_fails_loudly(venv_python, project_roo
                 "--root", str(tmp_path))
     assert proc.returncode != 0
     assert "not generated" in (proc.stdout + proc.stderr)
+
+
+# --- seal completeness: --seal must be exactly as strict as --seal-only ---
+#
+# --seal's check used to be the much weaker `(root / split).is_dir()`, which
+# a --limit run, a partially-failed run, or a --split mismatch could all
+# satisfy while most of the split's scenarios were still missing --
+# silently certifying an incomplete benchmark as sealed. Both flags now
+# share the same per-scenario completeness check (generate._missing_scenarios).
+
+def test_seal_refuses_an_incomplete_split_and_names_how_many_are_missing(
+        venv_python, project_root, tmp_path):
+    """Reproduces the reported bug: `--limit 3 --seal` must NOT seal the
+    full 45-scenario dev split just because a directory exists.
+
+    The 3 limited scenarios' outputs are pre-faked as already-complete, so
+    `run_many` skips them without invoking R (fast, no generation). --seal
+    then runs against the FULL dev split and must refuse, since the other
+    42 scenarios have no outputs at all.
+    """
+    all_dev = scenarios.build_split("dev")
+    limited = all_dev[:3]
+    for s in limited:
+        data = tmp_path / "dev" / s.sid
+        truth = tmp_path / "dev_truth" / s.sid
+        data.mkdir(parents=True, exist_ok=True)
+        truth.mkdir(parents=True, exist_ok=True)
+        (data / "media.csv").write_text("x\n")
+        (data / "sales.csv").write_text("x\n")
+        (truth / "ground_truth.csv").write_text("x\n")
+        (truth / "meta.json").write_text("{}")
+
+    proc = _run(venv_python, project_root, "--split", "dev", "--limit", "3",
+                "--seal", "--workers", "1", "--root", str(tmp_path))
+
+    assert proc.returncode != 0
+    combined = proc.stdout + proc.stderr
+    assert "not generated" in combined
+    assert f"{len(all_dev) - 3} of {len(all_dev)} scenarios missing" in combined
+    # Must not have silently certified the incomplete split as sealed.
+    assert not (tmp_path / "dev" / "SEALED").is_file()
+
+
+def test_seal_only_succeeds_on_a_fully_present_faked_split(venv_python, project_root,
+                                                           tmp_path):
+    dev_scns = _fake_split(tmp_path, "dev")
+
+    proc = _run(venv_python, project_root, "--split", "dev", "--seal-only",
+                "--root", str(tmp_path))
+
+    assert proc.returncode == 0, proc.stderr
+    assert f"sealed dev: {len(dev_scns)} scenarios" in proc.stdout
+    assert (tmp_path / "dev" / "SEALED").is_file()
+    assert (tmp_path / "dev" / "manifest.sha256").is_file()
+    assert (tmp_path / "dev_truth" / "manifest.sha256").is_file()
+
+
+def test_seal_only_success_is_verifiable_with_verify_seal(venv_python, project_root,
+                                                           tmp_path):
+    _fake_split(tmp_path, "dev")
+
+    proc = _run(venv_python, project_root, "--split", "dev", "--seal-only",
+                "--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stderr
+
+    ok, problems = seal.verify_seal("dev", root=tmp_path)
+    assert ok, problems
 
 
 # --- channel-aware cost model ---------------------------------------------

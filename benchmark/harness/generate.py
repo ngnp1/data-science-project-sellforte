@@ -92,6 +92,21 @@ def _plan(scns):
     return country_years, est_seconds
 
 
+def _missing_scenarios(split: str, sp_scns, root: Path) -> list[str]:
+    """sids in `sp_scns` that do not have media.csv on disk under `root`.
+
+    The one completeness check both --seal and --seal-only must use: sealing
+    is the mechanism the whole benchmark's black-box claim rests on, so
+    nothing may certify a split as sealed on a weaker check (e.g. merely
+    `(root / split).is_dir()`) than this one. A missing scenario can arise
+    from --limit, a failed scenario, or a --split mismatch -- --seal runs
+    right after generation, but that generation may not have covered every
+    scenario in the split, so the check still applies there too.
+    """
+    return [s.sid for s in sp_scns
+            if not (root / split / s.sid / "media.csv").is_file()]
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -128,8 +143,7 @@ def main(argv=None) -> int:
     if args.seal_only:
         for sp in splits:
             sp_scns = scenarios.build_split(sp)
-            missing = [s.sid for s in sp_scns
-                       if not (root / sp / s.sid / "media.csv").is_file()]
+            missing = _missing_scenarios(sp, sp_scns, root)
             if missing:
                 print(f"ERROR: {sp} is not generated ({len(missing)} of "
                       f"{len(sp_scns)} scenarios missing); generate before "
@@ -165,8 +179,11 @@ def main(argv=None) -> int:
     if args.seal:
         for sp in splits:
             sp_scns = scenarios.build_split(sp)
-            if not (root / sp).is_dir():
-                print(f"ERROR: {sp} is not generated", file=sys.stderr)
+            missing = _missing_scenarios(sp, sp_scns, root)
+            if missing:
+                print(f"ERROR: {sp} is not generated ({len(missing)} of "
+                      f"{len(sp_scns)} scenarios missing); generate before "
+                      f"sealing", file=sys.stderr)
                 return 2
             info = seal.seal_split(sp, sp_scns, root=root)
             print(f"sealed {sp}: {info['n_scenarios']} scenarios, "
