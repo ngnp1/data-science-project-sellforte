@@ -35,6 +35,22 @@ Three synthetic detectors define the range:
 | `shifted_oracle(n)` | IoU and boundary error respond to localisation error |
 | `wrong_channel_oracle` | channel errors surface in channel accuracy rather than vanishing into FN+FP |
 
+Recorded on the dev split (`baseline-*` entries in `dev_history.jsonl`):
+
+| detector | precision | recall | F1 | null FP rate (per country-year) |
+|---|---|---|---|---|
+| `perfect_oracle` | 1.000 | 1.000 | 1.000 | 0.000 |
+| `never_detect` | 0.000 | 0.000 | 0.000 | 0.000 |
+| `detect_everything` | 0.000 | 0.000 | 0.000 | 0.654 |
+
+> **`never_detect` and `detect_everything` are identical on precision, recall,
+> and F1** — 0.000 across all three, for both — despite being opposite
+> pathologies: one reports nothing, the other reports everything. The
+> null-scenario false-positive rate is the *only* number that tells them
+> apart. Read F1 alone on this benchmark and a detector that hallucinates
+> events everywhere looks exactly as bad as one that does nothing at all;
+> F1 must never be treated as a standalone headline here.
+
 ## Three things the loader reconciles
 
 Ground-truth shape and detector output shape were fixed independently — by the
