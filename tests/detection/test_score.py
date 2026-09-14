@@ -165,6 +165,28 @@ def test_corroboration_collapses_when_impressions_keep_flowing():
     assert sub_scores(event(p, "TV", 60, 89), p)["corroboration"] == 0.2
 
 
+def test_corroboration_is_unknown_when_impressions_are_never_reported():
+    """A channel whose impressions feed is empty everywhere OUTSIDE the event
+    window (as opposed to inside it, which is the "collapses" case above)
+    gives no signal either way: silence during the window could mean the
+    pause is corroborated, or could mean this series just never reports
+    impressions. corroboration must report unavailable rather than guessing.
+
+    Asserted against the literal 0.6, not params.CORROBORATION_UNKNOWN: the
+    previous suite for this file asserted nothing about CORROBORATION_UNKNOWN
+    at all, so mutating 0.6 to any other value passed every test here and was
+    only caught by test_params.py's transcription check -- not behavioural
+    coverage by this project's own rule. test_params.py pins
+    CORROBORATION_UNKNOWN to 0.6, so 0.6 is the correct literal here, and a
+    mutation to the parameter changes the actual result without moving this
+    expectation."""
+    assert params.CORROBORATION_UNKNOWN == 0.6
+    p = build({"TV": [100.0] * 60 + [0.0] * 30 + [100.0] * 60,
+               "Radio": [50.0] * 150},
+              impressions_by_channel={"TV": [0.0] * 150})
+    assert sub_scores(event(p, "TV", 60, 89), p)["corroboration"] == 0.6
+
+
 def test_consistency_is_the_fraction_of_channels_agreeing_for_a_dark_period():
     """A dark period claims the whole market. If one of four channels kept
     running, the claim is three-quarters supported."""
@@ -177,11 +199,51 @@ def test_consistency_is_the_fraction_of_channels_agreeing_for_a_dark_period():
 
 
 def test_consistency_is_full_for_a_single_channel_event():
-    """A channel-level event makes no claim about other channels, so there is
-    nothing to disagree with it."""
+    """A single_channel event's `channel` names the channel still RUNNING, so
+    its claim is about every OTHER channel in the market having stopped.
+    single_channel is in COUNTRY_LEVEL_TYPES for exactly this reason -- it is
+    a country-wide claim, just an inverted one. When the other channel really
+    did stop for the claimed window, consistency is full.
+
+    This test previously left event_type at its natural_holdout default,
+    which bypasses the country-level branch entirely and returns 1.0
+    unconditionally -- so despite its name it never exercised single_channel
+    at all. That is corrected here by actually passing event_type=
+    "single_channel"."""
+    p = build({"TV": [100.0] * 150,
+               "Radio": [100.0] * 60 + [0.0] * 30 + [100.0] * 60})
+    e = event(p, "TV", 60, 89, event_type="single_channel")
+    assert sub_scores(e, p)["consistency"] == 1.0
+
+
+def test_single_channel_run_derived_scores_read_the_channels_that_stopped():
+    """CRITICAL regression test. A single_channel event's `channel` names the
+    channel still RUNNING -- TV and Radio are dark, Digital keeps running,
+    channel="Digital". The run-derived sub-scores (magnitude_evidence,
+    distinctiveness, edge_sharpness) must be read from TV/Radio's off-run, not
+    from Digital, which has no off-run at all and would silently zero out
+    every one of them.
+
+    Reading `event.channel` directly for run selection -- instead of routing
+    through subject_channels() for every event type -- passed every other
+    test in this file while still returning 0.0 for all three of these on
+    every single_channel event: nothing else in the suite constructed a real
+    single_channel event and inspected the run-derived scores, so the defect
+    had no failing test."""
     p = build({"TV": [100.0] * 60 + [0.0] * 30 + [100.0] * 60,
-               "Radio": [50.0] * 150})
-    assert sub_scores(event(p, "TV", 60, 89), p)["consistency"] == 1.0
+               "Radio": [100.0] * 60 + [0.0] * 30 + [100.0] * 60,
+               "Digital": [100.0] * 150})
+    e = event(p, "Digital", 60, 89, event_type="single_channel")
+    s = sub_scores(e, p)
+    assert s["magnitude_evidence"] > 0.0
+    assert s["distinctiveness"] > 0.0
+    assert s["edge_sharpness"] > 0.0
+    # TV and Radio both go to an exact, clean 30-day zero -- with no other
+    # off-run on either series to compare against -- so the fully-determined
+    # expectation is that all three saturate at 1.0.
+    assert s["magnitude_evidence"] == 1.0
+    assert s["distinctiveness"] == 1.0
+    assert s["edge_sharpness"] == 1.0
 
 
 def test_edge_sharpness_is_lower_for_a_gradual_wind_down_than_a_clean_stop():
