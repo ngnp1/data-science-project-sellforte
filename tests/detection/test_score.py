@@ -13,10 +13,11 @@ COLS = ["date", "ad_platform", "advertising_channel", "campaign_name",
 
 
 def build(spend_by_channel, country="DE", start="2024-01-01",
-          impressions_by_channel=None):
+          impressions_by_channel=None, sales=None):
     """spend_by_channel: {channel: [daily spend]}. Impressions default to
     tracking spend (zero spend -> zero impressions), which is the corroborated
-    case; pass impressions_by_channel to break that link."""
+    case; pass impressions_by_channel to break that link. sales: optional
+    [daily turnover] for `country`, wired into panel.sales."""
     n = len(next(iter(spend_by_channel.values())))
     dates = pd.date_range(start, periods=n)
     rows = []
@@ -26,7 +27,13 @@ def build(spend_by_channel, country="DE", start="2024-01-01",
             impression = imps[i] if imps is not None else (100.0 if v > 0 else 0.0)
             rows.append([d, "P", ch, "c", 1, float(v), 1.0, float(impression),
                          0, 0.0, country])
-    return build_panel(pd.DataFrame(rows, columns=COLS), sid="dev_test")
+    sales_df = None
+    if sales is not None:
+        assert len(sales) == n
+        sales_df = pd.DataFrame({"date": dates, "country_code": country,
+                                 "turnover": [float(x) for x in sales]})
+    return build_panel(pd.DataFrame(rows, columns=COLS), sales_df,
+                       sid="dev_test")
 
 
 def event(panel, channel, start, end, event_type="natural_holdout",
@@ -468,3 +475,73 @@ def test_informativeness_is_bounded_and_reports_its_drivers():
     score, parts = informativeness(event(p, "TV", 60, 89), p)
     assert 0.0 <= score <= 1.0
     assert set(parts) == set(params.INFORMATIVENESS_WEIGHTS)
+
+
+def test_sales_snr_prefers_a_quiet_market_to_a_noisy_one_of_the_same_shape():
+    """Spec section 8's sixth driver: a noise measurement, not a causal claim
+    -- it never asks whether the spend change caused the sales move (that
+    would score the detector against its own answer key on a benchmark where
+    sales are generated from spend, exactly what the validity gate's declined
+    trigger avoids). It only asks whether a response would be READABLE.
+
+    Both markets get the identical window (a literal 100 -> 70 move on days
+    60-89) and the identical 60 days of trailing history -- SALES_BASELINE_WEEKS
+    is pinned to 8 weeks (56 days) by test_params.py, so 60 clears the baseline
+    requirement with margin regardless of its exact value, which is asserted
+    as a bound rather than baked into the fixture size. The only difference is
+    how much each market's OWN trailing turnover already swings: quiet is flat
+    at 100, noisy alternates 50/150 around the same median of 100. The same
+    30-point move must read as far more readable in the calm market."""
+    assert 5 <= params.SALES_BASELINE_WEEKS <= 8
+    quiet_sales = [100.0] * 60 + [70.0] * 30 + [100.0] * 60
+    noisy_sales = [50.0, 150.0] * 30 + [70.0] * 30 + [100.0] * 60
+    quiet = build({"TV": [100.0] * 150}, sales=quiet_sales)
+    noisy = build({"TV": [100.0] * 150}, sales=noisy_sales)
+    e_quiet = event(quiet, "TV", 60, 89)
+    e_noisy = event(noisy, "TV", 60, 89)
+    _, quiet_parts = informativeness(e_quiet, quiet)
+    _, noisy_parts = informativeness(e_noisy, noisy)
+    assert quiet_parts["sales_snr"] > noisy_parts["sales_snr"]
+    assert informativeness(e_quiet, quiet)[0] > informativeness(e_noisy, noisy)[0]
+
+
+def test_sales_snr_is_the_neutral_default_when_sales_are_absent():
+    """No sales frame at all (the `build()` default) must not raise and must
+    not silently read as either strong or weak evidence -- it degrades to the
+    literal 0.5 neutral default, not params.SALES_SNR_UNKNOWN, so a mutation
+    to that constant changes the actual result without moving this
+    expectation. test_params.py pins SALES_SNR_UNKNOWN to 0.5."""
+    assert params.SALES_SNR_UNKNOWN == 0.5
+    p = build({"TV": [100.0] * 60 + [0.0] * 30 + [100.0] * 60,
+               "Radio": [50.0] * 150})
+    _, parts = informativeness(event(p, "TV", 60, 89), p)
+    assert parts["sales_snr"] == pytest.approx(0.5)
+
+
+def test_consistency_carries_more_weight_for_a_dark_period_than_a_step_change(monkeypatch):
+    """The realistic regression here is CONFIDENCE_WEIGHTS being flattened or
+    a row copy-pasted across event types, and none of the tests above catch
+    that: each one holds an event fixture fixed and lets sub_scores() vary
+    naturally, so no test isolates consistency's contribution from the other
+    five. sub_scores() is monkeypatched to return identical values for every
+    sub-score except consistency, so the only thing that can move either
+    confidence() call below is CONFIDENCE_WEIGHTS itself -- not real panel
+    data, and not a reimplementation of confidence()'s own arithmetic."""
+    import detection.score as score_module
+
+    base = {"magnitude_evidence": 0.5, "duration_evidence": 0.5,
+            "distinctiveness": 0.5, "edge_sharpness": 0.5,
+            "corroboration": 0.5}
+    p = build({"TV": [100.0] * 150})
+    dark = event(p, None, 60, 89, event_type="dark_period")
+    step = event(p, "TV", 60, 89, event_type="step_change")
+
+    def scored(target_event, consistency):
+        monkeypatch.setattr(score_module, "sub_scores",
+                            lambda e, pp: dict(base, consistency=consistency))
+        return confidence(target_event, p)[0]
+
+    dark_delta = scored(dark, 1.0) - scored(dark, 0.0)
+    step_delta = scored(step, 1.0) - scored(step, 0.0)
+    assert dark_delta > step_delta
+    assert dark_delta > 0.0

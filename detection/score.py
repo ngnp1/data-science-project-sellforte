@@ -286,6 +286,50 @@ def _control_availability(event: DetectedEvent) -> float:
     return params.CONTROL_SCORE.get(control, params.CONTROL_SCORE["none"])
 
 
+def _sales_snr(event: DetectedEvent, panel: Panel) -> float:
+    """How readable a sales response would be in this window, if there were
+    one -- a noise measurement, not a causal claim.
+
+    This does NOT ask whether the spend change caused a sales change. On a
+    benchmark where sales are generated from spend, that question would score
+    the detector against its own answer key; it is exactly the trigger the
+    validity gate declines for that reason. This asks only how much this
+    market's own turnover already swings on its own: a holdout in a market
+    whose turnover is calm is more informative than the identical holdout in
+    a market whose turnover is already noisy, regardless of what is causing
+    either one.
+
+    The ratio is the window's departure from a trailing baseline's median,
+    scaled by that same baseline's own robust sigma -- both terms are in the
+    market's own turnover units, so the ratio is dimensionless and comparable
+    across the panel's 15x market-size range without any extra rescaling.
+    Degrades to SALES_SNR_UNKNOWN (never raises) when sales are absent, the
+    market has no sales column, there isn't enough trailing history to form a
+    baseline, or the trailing baseline is flat at zero.
+    """
+    country = event.country_code
+    if not country or country not in panel.sales.columns:
+        return params.SALES_SNR_UNKNOWN
+    series = panel.sales[country]
+    baseline_days = params.SALES_BASELINE_WEEKS * 7
+    trailing = series.loc[series.index < event.start]
+    if len(trailing) < baseline_days:
+        return params.SALES_SNR_UNKNOWN
+    trailing = trailing.iloc[-baseline_days:]
+    trailing_median = float(np.median(trailing.values))
+    if trailing_median <= 0:
+        return params.SALES_SNR_UNKNOWN
+    mad = float(np.median(np.abs(trailing.values - trailing_median)))
+    sigma = max(params.MAD_TO_SIGMA * mad,
+               params.SALES_SIGMA_FLOOR_FRAC * trailing_median)
+    window = series.loc[event.start:event.end]
+    if window.empty:
+        return params.SALES_SNR_UNKNOWN
+    departure = abs(float(np.median(window.values)) - trailing_median)
+    ratio = departure / sigma
+    return float(min(1.0, ratio / params.SALES_SNR_SATURATION))
+
+
 def informativeness(event: DetectedEvent, panel: Panel
                     ) -> tuple[float, dict[str, float]]:
     """Spec section 8's informativeness, plus its drivers.
@@ -300,6 +344,7 @@ def informativeness(event: DetectedEvent, panel: Panel
         "contrast": _contrast(event, panel),
         "cleanliness": _cleanliness(event),
         "control_availability": _control_availability(event),
+        "sales_snr": _sales_snr(event, panel),
         "type_prior": params.TYPE_PRIOR[event.event_type],
     }
     weights = params.INFORMATIVENESS_WEIGHTS
