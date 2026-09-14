@@ -40,14 +40,28 @@ def test_a_run_at_min_days_is_notable_when_the_series_is_otherwise_never_off():
 def test_an_intermittent_channel_needs_a_much_longer_run():
     """THE guard. A flighting channel whose normal gaps are 3 days must not
     report every gap; a fixed 7-day rule would fire on all of them."""
-    values = ([100.0] * 11 + [0.0] * 3) * 8          # 8 routine 3-day gaps
-    values += [100.0] * 11 + [0.0] * 8 + [100.0] * 20  # one 8-day gap
+    values = ([100.0] * 11 + [0.0] * 3) * 8           # 8 routine 3-day gaps
+    values += [100.0] * 11 + [0.0] * 10 + [100.0] * 20  # one 10-day gap
     runs = find_off_runs(s(values))
     routine = [r for r in runs if r.n_days == 3]
     assert len(routine) == 8
     assert not any(r.notable for r in routine)
-    long_run = [r for r in runs if r.n_days == 8]
+    long_run = [r for r in runs if r.n_days == 10]
     assert len(long_run) == 1 and long_run[0].notable
+
+
+def test_the_intermittent_guard_floor_is_three_times_the_p90_gap():
+    """Spec section 7: 'A flighting channel whose normal gaps are 3 days needs
+    at least 9 off-days to register.' With 8 routine 3-day gaps, p90 of the
+    other off-runs is 3, so the floor is RUN_RATIO * 3 = 9 -- an 8-day run
+    falls one day short of that floor and must NOT be notable, even though it
+    is longer than every routine gap and clears MIN_DAYS on its own."""
+    values = ([100.0] * 11 + [0.0] * 3) * 8          # 8 routine 3-day gaps
+    values += [100.0] * 11 + [0.0] * 8 + [100.0] * 20  # one 8-day gap, one
+                                                        # short of the 9-day floor
+    runs = find_off_runs(s(values))
+    long_run = [r for r in runs if r.n_days == 8]
+    assert len(long_run) == 1 and not long_run[0].notable
 
 
 def test_a_never_otherwise_off_channel_needs_only_min_days():

@@ -90,23 +90,11 @@ def find_off_runs(s: pd.Series, present: pd.Series | None = None) -> list[OffRun
         window = s.iloc[lo:hi + 1]
 
         others = np.delete(lengths, idx)
-        floor = params.MIN_DAYS
         if others.size >= params.MIN_RUNS_FOR_RATIO:
-            # The ratio guard's reference distribution is the OTHER off-runs
-            # that already clear MIN_DAYS on their own -- i.e. routine long
-            # pauses, such as a weekly flighting channel's regular week off.
-            # Short blips well under MIN_DAYS are already excluded by
-            # MIN_DAYS alone and must not inflate the bar for a distinct,
-            # much-longer run: with a homogeneous 3-day cadence, RUN_RATIO *
-            # p90(3) = 9 would make an honest 8-day dark period unreportable,
-            # even though nothing in that channel's history is anywhere near
-            # 8 days. Comparing only against gaps that were themselves
-            # already "long" keeps the guard targeted at genuine periodic
-            # long-pause channels instead of penalizing short-blip noise.
-            qualifying = others[others >= params.MIN_DAYS]
-            if qualifying.size:
-                floor = max(params.MIN_DAYS,
-                            params.RUN_RATIO * float(np.percentile(qualifying, 90)))
+            floor = max(params.MIN_DAYS,
+                        params.RUN_RATIO * float(np.percentile(others, 90)))
+        else:
+            floor = params.MIN_DAYS
         notable = n_days >= floor
 
         if present is not None and not present.iloc[lo:hi + 1].any():
