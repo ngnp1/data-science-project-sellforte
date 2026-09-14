@@ -24,6 +24,11 @@ def test_every_documented_parameter_exists_with_the_spec_value():
     assert params.PULSE_MIN_RUNS == 2
     assert params.PULSE_LEN_IQR_RATIO == 0.5
     assert params.ONSET_SPREAD == 14
+    assert params.Z_SATURATION == 8.0
+    assert params.DURATION_SATURATION_MULT == 2.0
+    assert params.DISTINCTIVENESS_SATURATION == 3.0
+    assert params.CORROBORATION_CONTRADICTED == 0.2
+    assert params.CORROBORATION_UNKNOWN == 0.6
 
 
 def test_window_parameters_are_whole_weeks():
