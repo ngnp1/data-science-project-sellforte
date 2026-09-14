@@ -198,3 +198,11 @@ python -m benchmark.harness.generate --split dev --workers 1
 ```
 
 Generation is resumable, so this skips every complete scenario and retries only the missing one; alone on the machine it gets a whole core instead of a sixth of one. Raise `R_TIMEOUT_S` only if a scenario also times out at `--workers 1` — that would mean the constant is genuinely too low, rather than that six R processes were fighting over six performance cores.
+
+## The evaluation harness
+
+`benchmark/eval/` implements every reconciliation this document describes, and
+`benchmark/eval/README.md` explains how to run it. The loader traps above are
+not advisory — `tests/eval/` asserts on every suite run that a perfect oracle
+scores exactly 1.0 over the whole dev split, which is only true if all three
+reconciliations are applied.
