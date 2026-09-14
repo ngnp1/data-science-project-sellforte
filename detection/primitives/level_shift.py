@@ -82,9 +82,10 @@ def find_level_shifts(s: pd.Series) -> list[LevelShift]:
             continue
 
         # Persistence: the new level must still hold PERSIST days later.
+        # t <= n - W - 1, so n - t >= W + 1 and this tail always holds at
+        # least W + 1 - PERSIST days. No length guard is reachable here; one
+        # used to sit at this line and no input could trip it.
         tail_end = min(n, t + params.PERSIST + params.W)
-        if tail_end - (t + params.PERSIST) < 2:
-            continue
         held = float(np.median(y[t + params.PERSIST:tail_end])
                      - np.median(before))
         if (abs(held) < abs(delta) * params.PERSIST_FRACTION

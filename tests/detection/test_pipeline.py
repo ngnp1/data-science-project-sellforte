@@ -14,6 +14,10 @@ import pytest
 from detection.model import EVENT_TYPES, DetectedEvent
 from detection.pipeline import run_detection
 
+_MEDIA_COLS = ["date", "ad_platform", "advertising_channel", "campaign_name",
+        "campaign_id", "media_investment", "clicks", "impressions",
+        "conversions", "conversion_value", "country_code"]
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 DEV = ROOT / "benchmark" / "datasets" / "dev"
 
@@ -263,3 +267,11 @@ def test_the_detector_never_reads_ground_truth(monkeypatch):
     _install_truth_guard(monkeypatch)
     events = run_detection(media, sales, "dev_005")
     assert all(isinstance(e, DetectedEvent) for e in events)
+
+
+def test_an_empty_media_frame_returns_no_events_rather_than_raising():
+    """A filtered export or a market with no bookings yet is an empty frame,
+    not a bug. It used to reach pd.date_range and surface as "Neither start nor
+    end can be NaT"."""
+    empty = pd.DataFrame(columns=_MEDIA_COLS)
+    assert run_detection(empty, None, "dev_test") == []

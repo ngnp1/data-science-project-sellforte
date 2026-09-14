@@ -82,11 +82,34 @@ def test_detection_package_has_no_import_path_to_truth():
     if not det.is_dir():
         return
     offenders = []
-    for py in det.rglob("*.py"):
-        found = _truth_reaching_imports(py.read_text())
+    for f in det.rglob("*"):
+        if not f.is_file() or "__pycache__" in f.parts:
+            continue
+        try:
+            text = f.read_text()
+        except UnicodeDecodeError:
+            # A binary file under detection/ cannot be source, and a data blob
+            # is exactly what the companion check below exists to catch.
+            continue
+        found = _truth_reaching_imports(text)
         if found:
-            offenders.append(f"{py.relative_to(ROOT)}: {found}")
+            offenders.append(f"{f.relative_to(ROOT)}: {found}")
     assert not offenders, f"detection/ reaches for truth: {offenders}"
+
+
+def test_the_detection_package_contains_only_source():
+    """The import scan and the final-run audit hash both used to look at *.py
+    alone. A precomputed answer table dropped under detection/ as JSON, CSV or
+    Parquet would have been read by the detector, scanned by neither, and
+    covered by no hash -- a way to smuggle in the answers that leaves no trace
+    in the audit record. detection/ is source; nothing else belongs there."""
+    det = ROOT / "detection"
+    if not det.is_dir():
+        return
+    intruders = [str(f.relative_to(ROOT)) for f in det.rglob("*")
+                 if f.is_file() and f.suffix != ".py"
+                 and "__pycache__" not in f.parts]
+    assert not intruders, f"non-source files under detection/: {intruders}"
 
 
 @pytest.mark.parametrize("line", [
