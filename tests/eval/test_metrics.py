@@ -246,3 +246,100 @@ def test_operating_curve_default_sweep_reaches_one_and_has_21_points():
     curve = M.operating_curve(t, p)
     assert len(curve) == 21
     assert curve[-1]["cut"] == 1.0
+
+
+def test_f1_is_the_harmonic_mean_not_the_arithmetic_one():
+    """I2. F1 is the benchmark's headline number, and every other assertion in
+    this file sits at precision == recall, where the harmonic and arithmetic
+    means agree exactly. Replacing the harmonic mean with the arithmetic one
+    therefore left the whole suite green. This case is deliberately
+    asymmetric: P = 0.25, R = 2/3. The harmonic mean is 0.364; the arithmetic
+    mean would be 0.458 -- a 26% overstatement of the project's headline."""
+    got = M.prf(n_tp=2, n_fp=6, n_fn=1)
+    assert got["precision"] == 0.25
+    assert abs(got["recall"] - 2 / 3) < 1e-9
+    assert abs(got["f1"] - 0.36363636363636365) < 1e-9
+    assert abs(got["f1"] - (0.25 + 2 / 3) / 2) > 0.09, (
+        "F1 equals the arithmetic mean of P and R -- the harmonic mean is gone")
+
+
+def test_boundary_p90_is_the_ninetieth_percentile_not_the_median():
+    """I3a. Spec section 9 item 3 requires median AND p90, and p90 is what
+    shows the tail -- the occasional badly-localised detection a median hides.
+    Every prior assertion used a fixture whose median and p90 coincide, so
+    changing `np.percentile(..., 90)` to `..., 50)` left the suite green.
+    Ten matched pairs with start offsets 0..9: median 4.5, p90 8.1."""
+    # One 40-day truth window per scenario, so no two pairs can contend.
+    t = [e("2024-03-01", "2024-04-09", sid=f"dev_{i:03d}") for i in range(9)]
+    # Start offsets 1..9 days; end offsets 0,0,0,1,1,1,2,2,2 -- so the start
+    # and end columns cannot coincide by accident either.
+    p = [Event(**{**t[i].__dict__,
+                  "start": t[i].start + pd.Timedelta(days=i + 1),
+                  "end": t[i].end - pd.Timedelta(days=i // 3)})
+         for i in range(9)]
+    got = M.boundary_error(match_events(t, p))
+
+    assert got["n"] == 9
+    assert got["start_median"] == 5.0                 # offsets 1..9
+    assert abs(got["start_p90"] - 8.2) < 1e-9         # 90th percentile of 1..9
+    assert got["start_p90"] > got["start_median"], (
+        "p90 collapsed onto the median -- the tail is no longer being reported")
+    assert got["end_median"] == 1.0                   # offsets 0,0,0,1,1,1,2,2,2
+    assert abs(got["end_p90"] - 2.0) < 1e-9
+    assert got["end_p90"] > got["end_median"]
+
+
+def test_boundary_error_reports_n_zero_when_nothing_matched():
+    """I3b (the metric half). With no matched pairs there is no boundary error
+    to report, and the zeros this returns are a convention, not a measurement.
+    `n` is what lets the renderer tell the two apart."""
+    t = [e("2024-03-01", "2024-03-10")]
+    got = M.boundary_error(match_events(t, []))
+    assert got["n"] == 0
+    assert got["start_median"] == 0.0 and got["start_p90"] == 0.0
+
+
+def test_operating_curve_keeps_full_confidence_detections_at_the_strictest_cut():
+    """I6. The comparison at the cut is `>=`, not `>`. At cut == 1.0 a `>`
+    would drop every confidence-1.0 detection, so a PERFECT detector's
+    strictest published operating point would read 0.000/0.000 -- and the
+    strictest point is exactly the one a reader quotes as the conservative
+    operating regime. No prior assertion pinned the boundary."""
+    t = [e("2024-03-01", "2024-03-10"), e("2024-06-01", "2024-06-10")]
+    p = [Event(**{**x.__dict__, "detection_confidence": 1.0}) for x in t]
+
+    curve = M.operating_curve(t, p, cuts=[1.0])
+    assert len(curve) == 1
+    row = curve[0]
+    assert row["cut"] == 1.0
+    assert row["n_pred"] == 2, (
+        "confidence-1.0 detections were dropped at cut 1.0 -- the threshold "
+        "comparison is exclusive")
+    assert row["precision"] == 1.0 and row["recall"] == 1.0 and row["f1"] == 1.0
+
+    # And the default sweep's last row agrees, since that is what gets rendered.
+    assert M.operating_curve(t, p)[-1]["recall"] == 1.0
+
+
+def test_market_accuracy_reads_the_same_whichever_market_is_dropped():
+    """I5, on the real dev scenario that exposed it. `dev_045` is a
+    `global_pause`: FR and NL share one identical dark window. A detector that
+    is perfect except for one dropped market used to read
+    market_accuracy 0.000 if FR was dropped and 1.000 if NL was dropped --
+    identical detector quality, the reading decided by alphabetical order.
+    """
+    from benchmark.eval import truth as T
+
+    truth = T.load_truth("dev", "dev_045")
+    assert {x.country_code for x in truth} == {"FR", "NL"}, "fixture moved"
+    assert len({(x.start, x.end) for x in truth}) == 1, "windows no longer identical"
+
+    readings = {}
+    for dropped in ("FR", "NL"):
+        pred = [x for x in truth if x.country_code != dropped]
+        readings[dropped] = M.channel_and_market_accuracy(truth, pred)
+
+    assert readings["FR"]["market_accuracy"] == readings["NL"]["market_accuracy"], (
+        f"same detector quality, different reading: {readings}")
+    assert readings["FR"]["market_accuracy"] == 1.0, (
+        "the one market that WAS found should read as correctly attributed")

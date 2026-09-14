@@ -6,7 +6,7 @@ from pathlib import Path
 from benchmark.eval import truth as T
 from benchmark.eval.breakdowns import breakdown_by
 from benchmark.eval.matching import match_events
-from benchmark.eval.metrics import evaluate_scenario, prf
+from benchmark.eval.metrics import evaluate_scenario, false_positive_rate, prf
 from benchmark.eval.model import Event
 
 BREAKDOWN_AXES = ("noise_level", "family", "n_countries", "n_channels",
@@ -33,7 +33,7 @@ def evaluate_split(detector, split: str, root: Path | None = None,
     meta_by_sid: dict = {}
     all_truth: list[Event] = []
     all_pred: list[Event] = []
-    null_preds = 0
+    null_pred: list[Event] = []
     null_country_years = 0.0
 
     for sid in sids:
@@ -50,7 +50,10 @@ def evaluate_split(detector, split: str, root: Path | None = None,
         all_pred.extend(pred)
 
         if meta["family"] == "null":
-            null_preds += len(pred)
+            # Kept as a flat list, not a running count, so the published rate
+            # comes out of metrics.false_positive_rate rather than a second,
+            # untested copy of the same arithmetic living here.
+            null_pred.extend(pred)
             null_country_years += meta["n_countries"] * meta["years"]
 
     overall_match = match_events(all_truth, all_pred)
@@ -75,8 +78,7 @@ def evaluate_split(detector, split: str, root: Path | None = None,
         "confusion": type_confusion(all_truth, all_pred),
         "reliability": reliability_curve(all_truth, all_pred),
         "operating": operating_curve(all_truth, all_pred),
-        "null_fp_rate": (null_preds / null_country_years
-                         if null_country_years else 0.0),
+        "null_fp_rate": false_positive_rate(null_pred, null_country_years),
         "null_country_years": null_country_years,
         "per_scenario": per_scenario,
         "breakdowns": {ax: breakdown_by(per_scenario, meta_by_sid, ax)

@@ -69,14 +69,37 @@ def _compatible(t: Event, p: Event, strict: bool) -> bool:
             and t.event_type == p.event_type)
 
 
+def _agreement(t: Event, p: Event) -> int:
+    """How many of country, channel and type a candidate pair agrees on.
+
+    Only ever non-uniform under `strict=False`, where the matcher is
+    deliberately blind to those three fields. Blindness is required -- it is
+    what makes a channel mix-up visible as a channel error rather than as
+    FN+FP -- but it must not decide WHICH pair to credit when several tie on
+    IoU. Two markets sharing one identical dark window (a `global_pause`, or
+    any multi-market dark period) produce exactly that tie, and breaking it on
+    event content alone pairs a missed market's truth with another market's
+    correct detection whenever the alphabet happens to line up that way. Market
+    accuracy then reads 0.000 or 1.000 for the same detector quality depending
+    on which country code sorts first. Preferring agreement first makes the
+    reading depend on the detector instead.
+    """
+    return ((t.country_code == p.country_code)
+            + (t.channel == p.channel)
+            + (t.event_type == p.event_type))
+
+
 def match_events(truth: list[Event], pred: list[Event], *,
                  min_iou: float = 0.5, strict: bool = True) -> MatchResult:
     """One-to-one assignment, best IoU first.
 
-    Greedy matching by descending temporal IoU. Ties on IoU are broken by
-    prediction event content (start, end, country_code, channel, event_type),
-    then truth event content, ensuring deterministic results regardless of
-    input order.
+    Greedy matching by descending temporal IoU. Ties on IoU are broken FIRST
+    by how much the pair agrees on country, channel and type, and only then by
+    prediction event content (start, end, country_code, channel, event_type)
+    and truth event content -- which keeps the result deterministic regardless
+    of input order while never letting alphabetical accident decide a tie that
+    a real agreement could settle. Under `strict=True` every candidate agrees
+    on all three, so the agreement term changes nothing there.
 
     `strict=False` ignores country, channel and type, which is what spec
     section 9 item 4 needs: under the strict match a channel mix-up vanishes
@@ -92,11 +115,13 @@ def match_events(truth: list[Event], pred: list[Event], *,
             if score >= min_iou:
                 candidates.append((score, t, p, ti, pi))
 
-    # Sort by descending IoU, then by prediction and truth content for
-    # deterministic tie-breaking regardless of caller's input order.
+    # Sort by descending IoU, then by descending country/channel/type
+    # agreement, then by prediction and truth content for deterministic
+    # tie-breaking regardless of caller's input order.
     def sort_key(c):
         score, t, p, ti, pi = c
-        return (-score, p.start, p.end, p.country_code or "", p.channel or "",
+        return (-score, -_agreement(t, p),
+                p.start, p.end, p.country_code or "", p.channel or "",
                 p.event_type or "", t.start, t.end, t.country_code or "",
                 t.channel or "", t.event_type or "")
 

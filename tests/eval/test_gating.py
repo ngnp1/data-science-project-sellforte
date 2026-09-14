@@ -124,3 +124,131 @@ def test_repeat_final_run_banners_the_report_and_increments_run_index(
 
     # The real final_runs.jsonl must still not exist as a result of this test.
     assert not (ROOT / "benchmark/eval/final_runs.jsonl").exists()
+
+
+def _fake_results() -> dict:
+    """The smallest results dict `compose_report` and `build_record` accept."""
+    return {
+        "split": "test",
+        "n_scenarios": 3,
+        "overall": {"precision": 1.0, "recall": 1.0, "f1": 1.0,
+                    "n_tp": 3, "n_fp": 0, "n_fn": 0},
+        "per_type": {},
+        "iou": {"mean_iou": 1.0, "median_iou": 1.0, "n": 3},
+        "boundary": {"start_median": 0.0, "start_p90": 0.0,
+                     "end_median": 0.0, "end_p90": 0.0, "n": 3},
+        "accuracy": {"channel_accuracy": 1.0, "market_accuracy": 1.0,
+                     "n_relaxed_matches": 3},
+        "day_level": {"precision": 1.0, "recall": 1.0, "f1": 1.0},
+        "confusion": {}, "reliability": [], "operating": [],
+        "null_fp_rate": 0.0, "null_country_years": 4.0,
+        "per_scenario": {}, "breakdowns": {}, "event_breakdowns": {},
+    }
+
+
+def _stub_the_gated_path(monkeypatch, tmp_path, results):
+    """Replace everything in run_final.main that would touch the sealed split.
+
+    The seal check, the SEALED marker and evaluate_split are all stubbed, and
+    PROJECT_ROOT is redirected into tmp_path, so nothing here reads
+    benchmark/datasets/test/ or its truth. The point of the test below is the
+    ORDER of the tail of main(), which needs none of that to be real.
+    """
+    from benchmark.eval import run_final
+
+    fake_root = tmp_path / "root"
+    (fake_root / "benchmark/datasets/test").mkdir(parents=True)
+    (fake_root / "benchmark/datasets/test/SEALED").write_text(
+        json.dumps({"spec_hash": "deadbeef", "sealed_at": "2026-01-01T00:00:00Z"}))
+
+    monkeypatch.setattr(run_final, "PROJECT_ROOT", fake_root)
+    monkeypatch.setattr(run_final.seal, "verify_seal", lambda split: (True, []))
+    monkeypatch.setattr(run_final, "load_detector", lambda spec: (lambda *a: []))
+    monkeypatch.setattr(run_final, "evaluate_split",
+                        lambda *a, **k: results)
+
+    fake_final_runs = tmp_path / "final_runs.jsonl"
+    monkeypatch.setattr(run_final, "FINAL_RUNS", fake_final_runs)
+    return run_final, fake_final_runs
+
+
+def test_a_failing_out_path_still_records_the_final_run(tmp_path, monkeypatch):
+    """C1: the audit record must survive a mistyped --out.
+
+    By the time --out is written the SEALED SPLIT HAS ALREADY BEEN READ and
+    the metrics have already been printed to the terminal. If the write raises
+    before final_runs.jsonl is appended to, the seal has been spent with no
+    trace: the next run reads a prior count of 0, records run_index 1, and its
+    report claims to be the first final evaluation of the hold-out split.
+    Spec sections 4.3 and 10 exist to make that impossible.
+
+    Never goes near the real gated path -- seal verification, the SEALED
+    marker, the detector and evaluate_split are all stubbed, and FINAL_RUNS
+    points into tmp_path.
+    """
+    import pytest
+
+    run_final, fake_final_runs = _stub_the_gated_path(
+        monkeypatch, tmp_path, _fake_results())
+
+    # A directory that does not exist: write_text raises.
+    bad_out = tmp_path / "no" / "such" / "dir" / "report.md"
+
+    with pytest.raises(OSError):
+        run_final.main(["--detector", "x:y", "--finalize", "--out", str(bad_out)])
+
+    assert not bad_out.exists()
+    assert fake_final_runs.is_file(), (
+        "the sealed split was read and the report printed, but no audit "
+        "record was written -- the next final run would call itself the first")
+    lines = fake_final_runs.read_text().splitlines()
+    assert len(lines) == 1
+    assert json.loads(lines[0])["run_index"] == 1
+
+    # And the NEXT run therefore knows it is a repeat.
+    assert run_final._prior_run_count() == 1
+    assert not (ROOT / "benchmark/eval/final_runs.jsonl").exists()
+
+
+def test_compose_report_puts_the_repeat_banner_above_the_report(
+        tmp_path, monkeypatch):
+    """The composition itself, not a restatement of string concatenation.
+
+    Replaces the earlier tautologies (`assert (a + b).startswith(a)`), which
+    tested Python rather than this program: they passed whether or not
+    main() actually used the banner.
+    """
+    from benchmark.eval import run_final
+
+    monkeypatch.setattr(run_final, "FINAL_RUNS", tmp_path / "final_runs.jsonl")
+    results = _fake_results()
+
+    first = run_final.compose_report(results, run_index=1, prior_count=0)
+    assert first.startswith("# Evaluation")
+    assert "REPEAT FINAL RUN" not in first
+
+    repeat = run_final.compose_report(results, run_index=2, prior_count=1)
+    assert repeat.startswith("> **REPEAT FINAL RUN")
+    assert "#2" in repeat.splitlines()[0]
+    assert "1 prior" in repeat.splitlines()[0]
+    assert "final_runs.jsonl" in repeat.splitlines()[0]
+    # The body is still all there, below the banner.
+    assert repeat.endswith(first)
+
+
+def test_build_record_is_self_describing(tmp_path, monkeypatch):
+    """The record must carry run_index itself, rather than leaving a reader to
+    go count lines in final_runs.jsonl."""
+    import argparse
+
+    run_final, fake_final_runs = _stub_the_gated_path(
+        monkeypatch, tmp_path, _fake_results())
+    args = argparse.Namespace(detector="pkg.mod:fn")
+    marker = {"spec_hash": "deadbeef", "sealed_at": "2026-01-01T00:00:00Z"}
+
+    record = run_final.build_record(_fake_results(), args, 2, marker)
+    assert record["run_index"] == 2
+    assert record["detector"] == "pkg.mod:fn"
+    assert record["sealed_spec_hash"] == "deadbeef"
+    assert record["metrics"]["f1"] == 1.0
+    assert "detection_source_hash" in record and "timestamp" in record

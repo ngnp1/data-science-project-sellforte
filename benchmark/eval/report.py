@@ -23,6 +23,16 @@ def _rate_cell(m: dict, key: str) -> str:
     return "n/a" if _is_degenerate(m) else _pct(m[key])
 
 
+def _boundary_cell(b: dict, key: str) -> str:
+    """Boundary error is defined only over MATCHED pairs. With no matches at
+    all `metrics.boundary_error` returns zeros -- and rendered bare, a detector
+    that matched nothing (`never_detect`) reads as flawless boundary
+    localisation, which is the exact inverse of the truth. Same degenerate-row
+    class as the breakdown buckets above: render it as `n/a` and publish `n`
+    beside it so the reader can see how many matches the figure rests on."""
+    return "n/a" if not b.get("n") else f"{b[key]:.1f}"
+
+
 def render_markdown(results: dict) -> str:
     o = results["overall"]
     lines = [
@@ -50,12 +60,14 @@ def render_markdown(results: dict) -> str:
         "",
         "## Boundary error (days)",
         "",
-        "| | median | p90 |",
-        "|---|---|---|",
-        f"| start | {results['boundary']['start_median']:.1f} "
-        f"| {results['boundary']['start_p90']:.1f} |",
-        f"| end | {results['boundary']['end_median']:.1f} "
-        f"| {results['boundary']['end_p90']:.1f} |",
+        "| | median | p90 | n (matched pairs) |",
+        "|---|---|---|---|",
+        f"| start | {_boundary_cell(results['boundary'], 'start_median')} "
+        f"| {_boundary_cell(results['boundary'], 'start_p90')} "
+        f"| {results['boundary'].get('n', 0)} |",
+        f"| end | {_boundary_cell(results['boundary'], 'end_median')} "
+        f"| {_boundary_cell(results['boundary'], 'end_p90')} "
+        f"| {results['boundary'].get('n', 0)} |",
         "",
         "## Per event type",
         "",

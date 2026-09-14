@@ -6,8 +6,11 @@ meant to be a deliberate, recorded act rather than a convenience. It therefore:
   * refuses to run without an explicit --finalize flag;
   * verifies the test split's seal before reading anything, so a tampered or
     regenerated benchmark cannot quietly produce a number;
-  * appends an immutable record to final_runs.jsonl -- timestamp, the SHA-256
-    of the entire detection/ tree, the sealed spec_hash, and the metrics.
+  * appends an immutable record to final_runs.jsonl -- timestamp, a SHA-256
+    over every *.py file under detection/ (paths and contents; non-Python
+    files are not covered), the sealed spec_hash, and the metrics. The record
+    is appended even if rendering or writing --out fails, because by then the
+    sealed split has already been read.
 
 Run it ONCE, after the algorithms are final. A second run is possible but is
 permanently visible in final_runs.jsonl, and the report is expected to say so.
@@ -56,6 +59,36 @@ def _repeat_run_banner(run_index: int, prior_count: int) -> str:
     )
 
 
+def compose_report(results: dict, run_index: int, prior_count: int) -> str:
+    """The exact string `main` prints and writes to --out: the repeat-run
+    banner (empty on a first run) followed by the rendered report.
+
+    Extracted so the composition itself is testable. Asserting
+    `(banner + body).startswith(banner)` in a test proves nothing about this
+    program; calling this function and checking what comes out does.
+    """
+    return _repeat_run_banner(run_index, prior_count) + render_markdown(results)
+
+
+def build_record(results: dict, args, run_index: int, marker: dict) -> dict:
+    """The audit line for final_runs.jsonl. Built BEFORE the report is
+    rendered so the record can be appended no matter what happens during
+    rendering or --out."""
+    o = results["overall"]
+    return {
+        "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+        "run_index": run_index,
+        "detector": args.detector,
+        "detection_source_hash": source_hash(PROJECT_ROOT / "detection"),
+        "sealed_spec_hash": marker["spec_hash"],
+        "sealed_at": marker["sealed_at"],
+        "n_scenarios": results["n_scenarios"],
+        "metrics": {"precision": o["precision"], "recall": o["recall"],
+                    "f1": o["f1"], "mean_iou": results["iou"]["mean_iou"],
+                    "null_fp_rate": results["null_fp_rate"]},
+    }
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -98,29 +131,26 @@ def main(argv=None) -> int:
 
     results = evaluate_split(load_detector(args.detector), "test",
                              load_data=args.load_data)
-    report = _repeat_run_banner(run_index, prior_count) + render_markdown(results)
-    print(report)
-    if args.out:
-        Path(args.out).write_text(report)
 
-    o = results["overall"]
-    record = {
-        "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
-        "run_index": run_index,
-        "detector": args.detector,
-        "detection_source_hash": source_hash(PROJECT_ROOT / "detection"),
-        "sealed_spec_hash": marker["spec_hash"],
-        "sealed_at": marker["sealed_at"],
-        "n_scenarios": results["n_scenarios"],
-        "metrics": {"precision": o["precision"], "recall": o["recall"],
-                    "f1": o["f1"], "mean_iou": results["iou"]["mean_iou"],
-                    "null_fp_rate": results["null_fp_rate"]},
-    }
-    with FINAL_RUNS.open("a") as f:
-        f.write(json.dumps(record, sort_keys=True) + "\n")
-
-    print(f"\nRecorded in {FINAL_RUNS.name}. detection/ hash "
-          f"{record['detection_source_hash'][:16]}")
+    # From here on the sealed split HAS BEEN READ. The audit record is what
+    # makes that irreversible act visible to the next run, so it is built
+    # first and appended in a `finally`: a mistyped --out (an unwritable
+    # directory, a typo'd path) used to raise between printing the metrics and
+    # appending the record, leaving the numbers on the terminal, the seal
+    # spent, and final_runs.jsonl empty -- so the NEXT run would record
+    # run_index 1 and its report would claim to be the first final evaluation.
+    # Spec sections 4.3 and 10 exist to make exactly that impossible.
+    record = build_record(results, args, run_index, marker)
+    try:
+        report = compose_report(results, run_index, prior_count)
+        print(report)
+        if args.out:
+            Path(args.out).write_text(report)
+    finally:
+        with FINAL_RUNS.open("a") as f:
+            f.write(json.dumps(record, sort_keys=True) + "\n")
+        print(f"\nRecorded in {FINAL_RUNS.name}. detection/ hash "
+              f"{record['detection_source_hash'][:16]}")
     return 0
 
 

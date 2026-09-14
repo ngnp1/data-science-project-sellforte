@@ -183,3 +183,4 @@ def test_wrong_channel_oracle_is_caught_by_channel_accuracy_not_by_f1():
     assert got["accuracy"]["channel_accuracy"] < 1.0
     assert got["accuracy"]["market_accuracy"] == 1.0
     assert got["event_level"]["f1"] < 1.0
+
