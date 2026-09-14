@@ -5,15 +5,21 @@ def test_every_documented_parameter_exists_with_the_spec_value():
     """Spec section 7's parameter table. These are the defaults the design was
     reasoned about; changing one is a deliberate act, not a typo."""
     assert params.RHO == 0.05
+    assert params.EPS_ABS == 1e-6
     assert params.MIN_DAYS == 7
     assert params.RUN_RATIO == 3.0
+    assert params.MIN_RUNS_FOR_RATIO == 5
     assert params.W == 21
     assert params.Z_THRESH == 3.5
     assert params.SIGMA_FLOOR == 0.05
     assert params.PERSIST == 14
     assert params.SHARPNESS == 0.6
-    assert params.ONSET_SPREAD == 14
+    assert params.SHARPNESS_WINDOW == 3
+    assert params.ROLLING == 7
     assert params.MAD_TO_SIGMA == 1.4826
+    assert params.PULSE_MIN_RUNS == 2
+    assert params.PULSE_LEN_IQR_RATIO == 0.5
+    assert params.ONSET_SPREAD == 14
 
 
 def test_window_parameters_are_whole_weeks():
@@ -25,15 +31,33 @@ def test_window_parameters_are_whole_weeks():
 
 def test_no_logic_module_hardcodes_a_threshold():
     """Every threshold lives here. A magic number in a primitive is how two
-    parameters silently drift apart."""
+    parameters silently drift apart.
+
+    This test derives the list of forbidden literals from params.py itself,
+    checking only FLOAT-valued parameters. Integer thresholds (7, 3, 2, 14, 21)
+    are deliberately out of scope because their literals are indistinguishable
+    from ordinary indices, ranges and slicing. A value written differently
+    (e.g. .6 for 0.6, or 7/2 for 3.5) would also slip past this guard.
+    """
     import pathlib
+
+    # Derive the needle list from params.py itself (float values only).
+    needles = []
+    for name in dir(params):
+        if name.startswith("_"):
+            continue
+        val = getattr(params, name)
+        if isinstance(val, float):
+            # Format the float as it would appear in source code.
+            needles.append(str(val))
+
     root = pathlib.Path(__file__).resolve().parents[2] / "detection"
     offenders = []
     for py in root.rglob("*.py"):
         if py.name == "params.py":
             continue
         text = py.read_text()
-        for needle in ["0.05", "3.5", "0.6", "1.4826"]:
+        for needle in needles:
             if needle in text:
                 offenders.append(f"{py.name}: {needle}")
     assert not offenders, f"hardcoded thresholds: {offenders}"

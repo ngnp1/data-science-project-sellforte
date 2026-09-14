@@ -38,10 +38,21 @@ def test_evidence_is_per_instance_not_shared():
 
 
 def test_event_types_cover_everything_the_composer_can_emit():
+    """Literal assertion: detector labels match the fixed set."""
     assert EVENT_TYPES == frozenset({
         "dark_period", "single_channel", "natural_holdout",
         "step_change", "channel_pulse", "staggered_launch",
     })
+
+
+def test_event_types_are_matchable_by_the_harness():
+    """The detector cannot emit a label the harness is unable to score.
+
+    Emitting a label outside MATCHABLE_TYPES produces events that can never
+    match any truth row — false positives by construction.
+    """
+    from benchmark.eval.model import MATCHABLE_TYPES
+    assert EVENT_TYPES <= MATCHABLE_TYPES
 
 
 def test_channel_is_none_for_market_wide_events():
