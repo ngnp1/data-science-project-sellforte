@@ -153,10 +153,23 @@ def test_a_day_marked_absent_is_off_even_when_spend_is_positive():
         [False] * 10 + [True] * 5 + [False] * 10)
 
 
-def test_floating_point_dust_counts_as_off():
-    """EPS_ABS, the absolute floor under the relative threshold. A channel whose
-    'zero' days carry float dust from an upstream division must still read as
-    off; without an absolute floor a series whose active level is itself tiny
-    could put RHO * level below the dust."""
-    series = s([1e-9] * 12 + [100.0] * 30)
-    assert bool(off_mask(series).iloc[0]), "float dust must count as off"
+def test_floating_point_dust_counts_as_off_when_the_level_is_tiny():
+    """EPS_ABS, the absolute floor under the relative threshold.
+
+    It only binds where the RELATIVE threshold falls below the dust, which needs
+    an active level small enough that RHO * level < dust <= EPS_ABS. At ordinary
+    spend levels the relative threshold is far larger and the floor never
+    decides anything -- which is why a fixture at realistic magnitudes leaves
+    this parameter untested, as one here did.
+
+    The regime is reachable in practice: spend divided down by an upstream unit
+    conversion, or a channel whose booked amounts are rounding-error small,
+    leaves 'zero' days carrying dust that is tiny in absolute terms but large
+    relative to the level. Without the floor those days read as ACTIVE and the
+    channel looks like it never paused.
+    """
+    series = s([1e-7] * 12 + [5e-7] * 60)
+    positive = series[series > 0]
+    assert params.RHO * float(positive.median()) < 1e-7, (
+        "fixture must sit in the regime where the absolute floor binds")
+    assert bool(off_mask(series).iloc[0]), "dust under EPS_ABS must count as off"
