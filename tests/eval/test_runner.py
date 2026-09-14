@@ -129,3 +129,42 @@ def test_confounded_axis_warning_sits_between_its_heading_and_its_table():
     between_noise = lines[noise_heading + 1:noise_table]
     assert not any("confounded" in line.lower() for line in between_noise), (
         "noise_level is not a confounded axis and must not carry the warning")
+
+
+def test_boundary_error_on_zero_matches_renders_as_not_available():
+    """I3b. `metrics.boundary_error` returns zeros with `n: 0` when nothing
+    matched. Rendered bare, `never_detect` -- which matched nothing at all --
+    shows 0.0-day median and p90 boundary error: flawless localisation, on a
+    detector that localised nothing. Same degenerate-row class as the
+    breakdown buckets, and it gets the same `n/a` treatment, with `n` beside
+    it so the reader can see what the figure rests on."""
+    results = _minimal_results({})
+    results["boundary"] = {"start_median": 0.0, "start_p90": 0.0,
+                           "end_median": 0.0, "end_p90": 0.0, "n": 0}
+    md = render_markdown(results)
+    assert "| start | n/a | n/a | 0 |" in md
+    assert "| end | n/a | n/a | 0 |" in md
+    assert "| start | 0.0 | 0.0 |" not in md
+
+
+def test_boundary_error_with_real_matches_still_renders_the_numbers():
+    """The n/a fix must not hide a genuine measurement -- a detector that
+    matched events and localised them perfectly must still read 0.0."""
+    results = _minimal_results({})
+    results["boundary"] = {"start_median": 0.0, "start_p90": 3.0,
+                           "end_median": 1.0, "end_p90": 4.0, "n": 17}
+    md = render_markdown(results)
+    assert "| start | 0.0 | 3.0 | 17 |" in md
+    assert "| end | 1.0 | 4.0 | 17 |" in md
+    assert "n/a" not in md
+
+
+def test_never_detect_does_not_report_flawless_boundary_localisation():
+    """End to end on the real dev split: the detector that matches nothing
+    must not read as perfectly localised."""
+    got = evaluate_split(D.never_detect, "dev", sids=SOME)
+    assert got["boundary"]["n"] == 0
+    md = render_markdown(got)
+    boundary = md.split("## Boundary error")[1].split("##")[0]
+    assert "n/a" in boundary
+    assert "0.0" not in boundary

@@ -127,3 +127,54 @@ def test_events_from_different_scenarios_never_match():
     t = [e("2024-03-01", "2024-03-10", sid="dev_001")]
     p = [e("2024-03-01", "2024-03-10", sid="dev_002")]
     assert not match_events(t, p).matches
+
+
+def test_relaxed_tie_is_broken_by_agreement_not_by_the_alphabet():
+    """I5. Two markets share one identical window -- what `global_pause` and
+    every multi-market dark period look like. A detector that finds one of
+    them and misses the other produces two tied candidates at IoU 1.0 under
+    the relaxed match. Breaking that tie on event content alone pairs the
+    MISSED market's truth with the OTHER market's correct detection whenever
+    the country codes sort that way, so the same detector quality reads
+    differently depending on which market was dropped.
+    """
+    t = [e("2024-10-27", "2024-11-16", country="FR", channel=None),
+         e("2024-10-27", "2024-11-16", country="NL", channel=None)]
+
+    for dropped, kept in (("FR", "NL"), ("NL", "FR")):
+        p = [x for x in t if x.country_code == kept]
+        res = match_events(t, p, strict=False)
+        assert len(res.matches) == 1
+        m = res.matches[0]
+        assert m.truth.country_code == kept, (
+            f"with {dropped} dropped, the surviving {kept} detection was "
+            f"paired with the missing market's truth")
+        assert m.pred.country_code == kept
+
+
+def test_agreement_tie_break_does_not_rescue_a_genuinely_wrong_field():
+    """The counterpart: when NO candidate agrees, the tie-break must not
+    invent one. `wrong_channel_oracle` is that case -- every detection has the
+    wrong channel, so the relaxed match still pairs them and channel accuracy
+    still reports the error."""
+    t = [e("2024-03-01", "2024-03-10", country="DE", channel="TV"),
+         e("2024-03-01", "2024-03-10", country="AT", channel="TV")]
+    p = [e("2024-03-01", "2024-03-10", country="DE", channel="__wrong__"),
+         e("2024-03-01", "2024-03-10", country="AT", channel="__wrong__")]
+    res = match_events(t, p, strict=False)
+    assert len(res.matches) == 2
+    # Country still agrees, so pairs stay within their market...
+    assert all(m.truth.country_code == m.pred.country_code for m in res.matches)
+    # ...and the channel error is still fully visible.
+    assert all(m.truth.channel != m.pred.channel for m in res.matches)
+
+
+def test_strict_matching_is_unaffected_by_the_agreement_tie_break():
+    """Under strict matching every candidate agrees on all three fields, so
+    the new term is constant and cannot reorder anything."""
+    t = [e("2024-03-01", "2024-03-10")]
+    p = [e("2024-03-01", "2024-03-05"), e("2024-03-06", "2024-03-10")]
+    a = match_events(t, p)
+    b = match_events(t, list(reversed(p)))
+    assert len(a.matches) == 1 and len(b.matches) == 1
+    assert a.matches[0].pred.start == b.matches[0].pred.start
