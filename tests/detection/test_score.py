@@ -246,6 +246,31 @@ def test_single_channel_run_derived_scores_read_the_channels_that_stopped():
     assert s["edge_sharpness"] == 1.0
 
 
+def test_distinctiveness_reads_the_subject_channels_gap_history_not_the_named_channels():
+    """IMPORTANT regression test (round 2). _select_run correctly picks the
+    run from a SUBJECT channel for a single_channel event, but
+    _distinctiveness must build its "other off-runs" population from THAT
+    SAME channel too -- never from event.channel, which for a single_channel
+    event names the channel still RUNNING and can carry a completely
+    unrelated gap history of its own.
+
+    TV (the named, running channel) carries an unrelated 25-day off-run right
+    at the start of the series, nowhere near the event window. Radio (the
+    real subject -- the channel that actually stopped) has no other off-runs
+    at all. The previous test above happens to use a named channel (Digital)
+    with NO off-run history whatsoever, so it cannot tell "read from the
+    right channel" apart from "read from the wrong channel that happens to
+    have nothing else on it either" -- both give 1.0 by coincidence. This
+    fixture is built specifically so the two channels' gap histories differ:
+    reading TV's history (wrong) gives a 30-day run against a p90 of 25 days
+    -- ratio 1.2, score 0.4; reading Radio's history (right) finds no other
+    off-runs on Radio at all, so distinctiveness must be 1.0."""
+    p = build({"TV": [0.0] * 25 + [100.0] * 125,
+               "Radio": [100.0] * 60 + [0.0] * 30 + [100.0] * 60})
+    e = event(p, "TV", 60, 89, event_type="single_channel")
+    assert sub_scores(e, p)["distinctiveness"] == 1.0
+
+
 def test_edge_sharpness_is_lower_for_a_gradual_wind_down_than_a_clean_stop():
     """A clean stop (spend at full level right up to the run, full level right
     after) must score higher edge_sharpness than a gradual ramp down and back
