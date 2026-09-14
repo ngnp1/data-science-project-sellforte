@@ -1,10 +1,11 @@
 """Load ground truth into normalised, matchable intervals.
 
-Three reconciliations happen here, all forced by decisions frozen into the
-sealed data and documented in benchmark/BENCHMARK.md. They belong in the
-LOADER, not in any detector: the detector output shape is fixed by spec
-section 7, and the truth shape is fixed by the generator, so this module is the
-only place the two can be brought together.
+Three mismatches between truth shape and detector output shape are settled
+here, all forced by decisions frozen into the sealed data and documented in
+benchmark/BENCHMARK.md. TWO of them are reconciled by this loader; the third is
+only DECIDED here and must be honoured by the detector. The detector output
+shape is fixed by spec section 7 and the truth shape by the generator, so this
+module is where the convention is written down either way.
 
 1. channel_pulse truth is one row per off-window; spec section 7's P3 emits ONE
    grouped event. Ungrouped, a grouped detection scores IoU ~0.118 against any
@@ -12,9 +13,16 @@ only place the two can be brought together.
    test split's matchable events.
 2. global_pause is a truth pattern_type but a detector TAG on a dark_period
    regime.
-3. staggered_launch truth is per-market; the detector emits a panel-level event.
-   Convention chosen here, once: fan out to one event per market, which keeps
-   the section 9 matcher unchanged.
+3. staggered_launch truth is per-market; spec section 7 has the DETECTOR emit
+   ONE panel-level event with no country_code. Convention chosen once: the
+   per-market shape wins, because it keeps the section 9 matcher unchanged.
+   NOTE that unlike (1) and (2), this loader does NOTHING for it -- truth rows
+   are already per-market and `_to_event` copies `country` through unchanged.
+   The obligation is entirely the DETECTOR's: it must fan its panel-level
+   staggered_launch out to one event per market, each carrying that market's
+   country_code, or every one of those events scores zero.
+   `detectors_for_testing.panel_launch_oracle` is the negative control that
+   holds this true.
 
 Interval dates come from scenario.json's `end_day`, never from the CSV's
 `end_date`. `reformat.py` clamps `end_idx` at the series end, so `end_date` is

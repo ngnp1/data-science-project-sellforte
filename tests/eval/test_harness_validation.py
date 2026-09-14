@@ -71,6 +71,41 @@ def test_ungrouped_pulse_oracle_fails_exactly_as_documented():
         "ungrouped pulses scored perfectly -- grouping is not being exercised"
 
 
+def test_panel_launch_oracle_fails_exactly_as_documented():
+    """I1. The negative control for the staggered_launch reconciliation, the
+    twin of the pulse one above.
+
+    Spec section 7 has the detector emit ONE panel-level staggered_launch with
+    no country_code. Truth rows are per-market and the loader copies `country`
+    through unchanged, so the fan-out to per-market events is entirely the
+    DETECTOR's obligation -- nothing in the loader can satisfy it, and until
+    this test existed nothing asserted it. `test_truth.py`'s
+    `country_code is not None` check is a property of scenario.json and cannot
+    fail whatever a detector does.
+
+    An otherwise-perfect detector left at spec section 7's shape must NOT
+    score 1.0 on staggered_launch.
+    """
+    launch_sids = [sid for sid in DEV_WITH_EVENTS
+                   if any(e.event_type == "staggered_launch"
+                          for e in T.load_truth("dev", sid))]
+    assert launch_sids, "no dev scenario carries a staggered_launch"
+
+    for sid in launch_sids:
+        got = score(sid, D.panel_launch_oracle)["per_type"]["staggered_launch"]
+        assert got["f1"] < 1.0, (
+            f"{sid}: a panel-level staggered_launch scored perfectly -- the "
+            f"per-market fan-out is not being exercised")
+        assert got["n_tp"] == 0, sid
+
+    # ...while everything else it emits is untouched, so the failure is
+    # attributable to the launch shape and nothing else.
+    sid = launch_sids[0]
+    other = {t: m for t, m in score(sid, D.panel_launch_oracle)["per_type"].items()
+             if t != "staggered_launch"}
+    assert all(m["f1"] == 1.0 for m in other.values()), other
+
+
 @pytest.mark.parametrize("sid", DEV_WITH_EVENTS[:10])
 def test_never_detect_scores_zero_recall_and_no_false_positives(sid):
     got = score(sid, D.never_detect)["event_level"]

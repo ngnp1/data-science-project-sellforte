@@ -58,6 +58,39 @@ def ungrouped_pulse_oracle(media, sales, sid: str) -> list[Event]:
     return out
 
 
+def panel_launch_oracle(media, sales, sid: str) -> list[Event]:
+    """Perfect except that staggered launches are emitted the way spec section
+    7 describes them -- ONE panel-level event with no `country_code`, spanning
+    the whole launch group -- rather than fanned out to one event per market.
+
+    Must NOT score 1.0. It is the negative control for the staggered_launch
+    reconciliation, the twin of `ungrouped_pulse_oracle`: truth rows are
+    already per-market and the loader copies `country` through unchanged, so
+    the fan-out is the DETECTOR's obligation and nothing in the loader can
+    satisfy it. Measured on dev before this control existed, a detector of
+    exactly this shape scored 0.000/0.000/0.000 on staggered_launch -- 16 of
+    the 127 matchable test events -- with the whole suite green.
+    """
+    out = []
+    groups: dict[tuple, list[Event]] = {}
+    for e in T.load_truth("dev", sid):
+        if e.event_type == "staggered_launch":
+            groups.setdefault((e.channel,), []).append(e)
+        else:
+            out.append(e)
+
+    for (channel,), group in sorted(groups.items(), key=lambda kv: str(kv[0])):
+        out.append(Event(
+            sid=sid,
+            country_code=None,          # panel-level: spec section 7's shape
+            channel=channel,
+            event_type="staggered_launch",
+            start=min(g.start for g in group),
+            end=max(g.end for g in group),
+        ))
+    return out
+
+
 def shifted_oracle(days: int) -> DetectorFn:
     """Perfect, but every interval slid `days` forward. Degrades IoU and shows
     up in boundary error, so it validates both."""

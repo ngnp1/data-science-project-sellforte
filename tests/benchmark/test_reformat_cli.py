@@ -1,11 +1,28 @@
 import subprocess
 
 import pandas as pd
+import pytest
 
 
 def _run(venv_python, generator_dir, tmp_path, events_yaml):
-    """Reformat a two-row slice of the committed raw output into tmp_path."""
-    raw = pd.read_csv(generator_dir / "raw_daily_wide.csv")
+    """Reformat a three-row-per-country slice of the generator's raw output.
+
+    `raw_daily_wide.csv` is NOT in the repository: .gitignore excludes it and
+    git does not track it, because it is a large regenerable artefact. It
+    exists in a working copy only if someone has run the R generator. Without
+    this guard these three tests fail on a fresh clone, and any "N passed"
+    figure quoted from a machine that happens to have the file is not
+    reproducible by whoever receives the branch.
+    """
+    raw_path = generator_dir / "raw_daily_wide.csv"
+    if not raw_path.is_file():
+        pytest.skip(
+            "synthetic_data_generator/raw_daily_wide.csv is absent (gitignored "
+            "and untracked). Regenerate it by running, from inside "
+            "synthetic_data_generator/: `Rscript generate_with_simmmulator.R` "
+            "(needs R with the siMMMulator and yaml packages; see "
+            "synthetic_data_generator/README.md).")
+    raw = pd.read_csv(raw_path)
     raw.groupby("country_code").head(3).to_csv(tmp_path / "raw_daily_wide.csv", index=False)
     events = tmp_path / "events.yaml"
     events.write_text(events_yaml)

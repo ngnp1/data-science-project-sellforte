@@ -58,6 +58,13 @@ def render_markdown(results: dict) -> str:
         f"| {_pct(results['accuracy']['market_accuracy'])} |",
         f"| Day-level F1 | {_pct(results['day_level']['f1'])} |",
         "",
+        "> **Precision, recall and F1 cannot tell a silent detector from an "
+        "indiscriminate one.** A detector that reports nothing and a detector "
+        "that reports everything both land at 0.000 on all three here. The "
+        "null-scenario false-positive rate above is the only number that "
+        "separates them, so F1 must never be quoted from this report as a "
+        "standalone headline.",
+        "",
         "## Boundary error (days)",
         "",
         "| | median | p90 | n (matched pairs) |",
@@ -124,5 +131,31 @@ def render_markdown(results: dict) -> str:
                 f"| {value} | {m['n_scenarios']} | {_rate_cell(m, 'precision')} "
                 f"| {_rate_cell(m, 'recall')} | {_rate_cell(m, 'f1')} |")
         lines.append("")
+
+    event_breakdowns = results.get("event_breakdowns") or {}
+    if event_breakdowns:
+        lines += [
+            "## Event-level breakdowns",
+            "",
+            "_Spec §9 item 10's duration, magnitude and near-zero-vs-exact-zero"
+            " axes. `meta.json` carries none of the three, so these bucket "
+            "individual TRUTH events rather than whole scenarios — which makes "
+            "them **recall-only**: a false positive belongs to no truth "
+            "bucket, so precision has no denominator here and is not "
+            "reported._",
+            "",
+        ]
+        for axis, rows in event_breakdowns.items():
+            lines += [f"### {axis}", ""]
+            if not rows:
+                lines += ["_No truth event carries this property._", ""]
+                continue
+            lines += ["| value | truth events | matched | recall |",
+                      "|---|---|---|---|"]
+            for r in rows:
+                lines.append(
+                    f"| {r['value']} | {r['n_events']} | {r['n_matched']} "
+                    f"| {_pct(r['recall'])} |")
+            lines.append("")
 
     return "\n".join(lines)
