@@ -28,12 +28,26 @@ def test_near_zero_is_off_at_the_rho_threshold():
 
 
 def test_a_run_shorter_than_min_days_is_not_notable():
-    runs = find_off_runs(run_of(100.0, 20, params.MIN_DAYS - 1, 20))
+    """Sized with a literal 5, not MIN_DAYS - 1. An input derived from the
+    constant under test moves with it, so the assertion holds for every value
+    the constant could take and pins nothing -- MIN_DAYS could be set to 3 and
+    this whole module would stay green."""
+    assert 5 < params.MIN_DAYS <= 20, "fixture assumes MIN_DAYS in (5, 20]"
+    runs = find_off_runs(run_of(100.0, 20, 5, 20))
     assert len(runs) == 1 and not runs[0].notable
 
 
 def test_a_run_at_min_days_is_notable_when_the_series_is_otherwise_never_off():
     runs = find_off_runs(run_of(100.0, 20, params.MIN_DAYS, 20))
+    assert len(runs) == 1 and runs[0].notable
+
+
+def test_a_twenty_day_run_is_notable_when_the_series_is_otherwise_never_off():
+    """The literal-sized companion to the test above: whatever MIN_DAYS is set
+    to within its asserted range, twenty off-days on an otherwise-always-on
+    series must register."""
+    assert 5 < params.MIN_DAYS <= 20
+    runs = find_off_runs(run_of(100.0, 20, 20, 20))
     assert len(runs) == 1 and runs[0].notable
 
 
@@ -67,7 +81,8 @@ def test_the_intermittent_guard_floor_is_three_times_the_p90_gap():
 def test_a_never_otherwise_off_channel_needs_only_min_days():
     """Complement of the test above: the ratio rule must not punish a series
     that has no gap distribution to compare against."""
-    runs = notable_runs(run_of(100.0, 100, params.MIN_DAYS, 100))
+    assert 5 < params.MIN_DAYS <= 20
+    runs = notable_runs(run_of(100.0, 100, 20, 100))
     assert len(runs) == 1
 
 

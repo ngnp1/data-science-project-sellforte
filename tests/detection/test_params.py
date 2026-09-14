@@ -14,6 +14,10 @@ def test_every_documented_parameter_exists_with_the_spec_value():
     assert params.SIGMA_FLOOR == 0.05
     assert params.PERSIST == 14
     assert params.SHARPNESS == 0.6
+    # Extracted from literals during Task 5 and omitted from this list until the
+    # final review found both unpinned by any test, behavioural or value.
+    assert params.PERSIST_FRACTION == 0.5
+    assert params.EPISODE_MATCH_BAND == 2.0
     assert params.SHARPNESS_WINDOW == 3
     assert params.ROLLING == 7
     assert params.MAD_TO_SIGMA == 1.4826

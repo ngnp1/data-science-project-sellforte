@@ -283,3 +283,23 @@ def test_no_step_episode_can_be_shorter_than_the_regime_floor():
     this assertion ever fails, reinstate the floor.
     """
     assert params.W >= params.MIN_DAYS
+
+
+def test_channels_dormant_from_day_one_are_not_a_single_channel_period():
+    """The _was_active_around guard on the SINGLE_CHANNEL branch had no test.
+    Its twin on the holdout branch did, which made this copy read as covered --
+    bypassing it changed no test while emitting a spurious 120-day event.
+
+    Two of three channels dormant from day one is a market that had not started
+    them yet, not a market that switched them off. On a multi-market panel
+    find_staggered_launches claims this window first, which is why no
+    development scenario reaches this branch; a single-market scenario does, and
+    the generator's shape rules allow one.
+    """
+    p = build({
+        "TV": [100.0] * 300,
+        "Radio": [0.0] * 120 + [80.0] * 180,
+        "Print": [0.0] * 120 + [60.0] * 180,
+    })
+    events = label_market(p, "DE", "dev_test")
+    assert [e for e in events if e.event_type == "single_channel"] == []

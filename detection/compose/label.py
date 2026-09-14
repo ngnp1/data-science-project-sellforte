@@ -178,7 +178,7 @@ def _step_events(panel: Panel, country: str, sid: str,
                 sid=sid, country_code=country, channel=ch,
                 event_type="step_change", start=ep.start, end=ep.end,
                 magnitude_ratio=ep.ratio,
-                evidence={"z": ep.z},
+                evidence={"z": ep.z, "rose_from_zero": ep.ratio is None},
             ))
     return events
 
@@ -210,14 +210,26 @@ def label_market(panel: Panel, country: str, sid: str) -> list[DetectedEvent]:
                 and not all(_inside_a_pulse(pulse_spans, ch, regime)
                             for ch in off)
                 and all(_was_active_around(matrix, ch, regime) for ch in off)):
-            # MORE THAN ONE channel has to have gone dark. The spec's table
-            # says "at least 2 channels exist", which is off by one: in a
-            # two-channel market that leaves exactly one channel off, and the
-            # generator calls that a holdout, naming the channel that STOPPED,
-            # not a single-channel period naming the one that kept running.
+            # MORE THAN ONE channel has to have gone dark.
+            #
+            # This differs from the spec's "at least 2 channels exist" ONLY in
+            # a two-channel market -- everywhere else, one active channel
+            # already implies two or more off. And in a two-channel market the
+            # label is genuinely AMBIGUOUS FROM SPEND ALONE: one channel
+            # stopping and one continuing is the same shape either way, and
+            # which name it carries depends only on which scenario family drew
+            # it, not on anything observable in the data.
+            #
+            # An earlier version of this comment claimed the generator has a
+            # convention here, naming the channel that stopped. It does not,
+            # and that claim was false. Choosing to report the window as a
+            # holdout is a PRIOR, not a reading of the generator: it is right
+            # about as often as it is wrong, and it is deliberately not tuned
+            # to the handful of development scenarios that would flip it.
+            #
             # Requiring two off channels also stops a market that runs exactly
             # one channel and never stops it from reporting its whole history
-            # as a single-channel period.
+            # as a single-channel period -- that part is unambiguous.
             events.append(DetectedEvent(
                 sid=sid, country_code=country,
                 channel=next(iter(regime.active)),
