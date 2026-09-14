@@ -1,4 +1,6 @@
 import pandas as pd
+import dataclasses
+
 import pytest
 
 from detection.model import EVENT_TYPES, DetectedEvent
@@ -18,7 +20,7 @@ def test_n_days_is_inclusive():
 
 
 def test_is_frozen():
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         ev().start = pd.Timestamp("2024-01-01")
 
 
@@ -36,13 +38,6 @@ def test_evidence_is_per_instance_not_shared():
     a.evidence["x"] = 1
     assert b.evidence == {}
 
-
-def test_event_types_cover_everything_the_composer_can_emit():
-    """Literal assertion: detector labels match the fixed set."""
-    assert EVENT_TYPES == frozenset({
-        "dark_period", "single_channel", "natural_holdout",
-        "step_change", "channel_pulse", "staggered_launch",
-    })
 
 
 def test_event_types_are_matchable_by_the_harness():

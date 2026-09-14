@@ -30,6 +30,13 @@ from detection.model import DetectedEvent
 
 def run_detection(media_df: pd.DataFrame, sales_df: pd.DataFrame | None = None,
                   sid: str = "") -> list[DetectedEvent]:
+    # An empty-but-present media frame is a real shape (a filtered export, a
+    # market with no bookings yet). Without this it reached pd.date_range and
+    # surfaced as "Neither start nor end can be NaT", which tells the caller
+    # nothing. No rows means nothing to detect.
+    if media_df is None or media_df.empty:
+        return []
+
     panel = build_panel(media_df, sales_df, sid)
 
     events: list[DetectedEvent] = []

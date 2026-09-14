@@ -251,5 +251,4 @@ def label_market(panel: Panel, country: str, sid: str) -> list[DetectedEvent]:
                 ))
 
     events.extend(_step_events(panel, country, sid, channels))
-    events.sort(key=lambda e: (e.start, str(e.channel), e.event_type))
     return events

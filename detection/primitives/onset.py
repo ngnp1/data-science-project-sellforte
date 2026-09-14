@@ -24,7 +24,12 @@ class Onset:
 def find_onset(s: pd.Series, present: pd.Series | None = None) -> Onset | None:
     runs = find_off_runs(s, present)          # empty if the channel never ran
     for r in runs:
-        if r.touches_start and not r.touches_end and r.n_days >= params.MIN_DAYS:
+        # A run cannot touch both edges here: find_off_runs returns []
+        # when active_level is not positive, so an all-off series never
+        # reaches this loop. The redundant edge check that used to sit in
+        # this condition was unreachable, and this file now follows the
+        # same rule the composer does -- no gate that no input can trip.
+        if r.touches_start and r.n_days >= params.MIN_DAYS:
             idx = s.index.get_loc(r.end)
             return Onset(first_active=s.index[idx + 1], dormant_days=r.n_days)
     return None
@@ -33,6 +38,6 @@ def find_onset(s: pd.Series, present: pd.Series | None = None) -> Onset | None:
 def find_discontinuation(s: pd.Series,
                          present: pd.Series | None = None) -> OffRun | None:
     for r in find_off_runs(s, present):
-        if r.touches_end and not r.touches_start and r.n_days >= params.MIN_DAYS:
+        if r.touches_end and r.n_days >= params.MIN_DAYS:
             return r
     return None

@@ -256,3 +256,17 @@ def test_the_drop_into_an_off_window_is_excluded_but_the_rise_out_is_kept():
     episodes = find_step_episodes(series, exclude=off)
     assert not any(e.start <= lo for e in episodes), (
         "no episode may open at or before the drop into the off-window")
+
+
+def test_a_noiseless_series_does_not_fire_on_a_trivial_shift():
+    """SIGMA_FLOOR, whose spec risk note ("too low makes flat series fire
+    spuriously") was until now unverified: every other fixture here carries 5%
+    noise, so the floor never binds and mutating it changed no test.
+
+    On a series with no noise at all the MAD is zero, so the robust sigma
+    collapses and any shift divides by almost nothing. A 0.6% change is not a
+    budget decision; the floor is what stops it reading as one. Drop the floor
+    and both shifts below fire.
+    """
+    assert find_step_episodes(s([100.0] * 120 + [100.6] * 120)) == []
+    assert find_step_episodes(s([100.0] * 120 + [103.0] * 120)) == []

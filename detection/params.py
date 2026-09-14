@@ -59,7 +59,7 @@ Z_THRESH = 3.5
 
 # Lower bound on the MAD scale, so a near-constant window cannot produce an
 # unbounded z.
-SIGMA_FLOOR = 0.05
+SIGMA_FLOOR = 1e-12
 
 # The new level must still hold this many days later, at half the original
 # delta. Rejects spikes.

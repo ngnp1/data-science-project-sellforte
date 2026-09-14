@@ -138,3 +138,25 @@ def test_a_channel_that_never_ran_yields_no_runs():
 def test_edge_sharpness_is_high_for_a_clean_stop():
     r = find_off_runs(run_of(100.0, 20, 10, 20))[0]
     assert r.edge_sharpness > 0.9
+
+
+def test_a_day_marked_absent_is_off_even_when_spend_is_positive():
+    """off_mask ORs in ~present, and on any panel build_panel produces that term
+    can never add a day (absent days always carry zero spend), so it read as
+    inert. It is not inert in principle: a real campaign-grained export can book
+    spend against a day the channel was not actually live. Pinning the disjunct
+    here keeps it honest rather than deleting a guard that real data needs."""
+    series = s([100.0] * 10 + [100.0] * 5 + [100.0] * 10)
+    present = pd.Series([True] * 10 + [False] * 5 + [True] * 10,
+                        index=series.index)
+    assert list(off_mask(series, present)) == (
+        [False] * 10 + [True] * 5 + [False] * 10)
+
+
+def test_floating_point_dust_counts_as_off():
+    """EPS_ABS, the absolute floor under the relative threshold. A channel whose
+    'zero' days carry float dust from an upstream division must still read as
+    off; without an absolute floor a series whose active level is itself tiny
+    could put RHO * level below the dust."""
+    series = s([1e-9] * 12 + [100.0] * 30)
+    assert bool(off_mask(series).iloc[0]), "float dust must count as off"

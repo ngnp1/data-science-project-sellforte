@@ -73,21 +73,40 @@ def test_channel_share_is_zero_not_nan_on_a_dark_day():
 
 
 def test_market_scale_is_the_long_run_median_of_total_spend():
+    """The daily totals vary and are deliberately skewed, so median, mean, min
+    and max all differ: a constant series cannot tell them apart, and the name
+    of this test claims specifically the median.
+
+    Daily totals are 100, 100, 100, 100, 1000 -- median 100, mean 280. A spike
+    must not drag the market's scale with it, which is the whole reason this is
+    a median."""
+    totals = [100.0, 100.0, 100.0, 100.0, 1000.0]
     rows = []
-    for d in pd.date_range("2024-01-01", periods=5):
-        rows.append(row(d, "DE", "TV", 60.0))
-        rows.append(row(d, "DE", "Radio", 40.0))
-    assert market_scale(build_panel(media(rows)), "DE") == 100.0
+    for d, total in zip(pd.date_range("2024-01-01", periods=5), totals):
+        rows.append(row(d, "DE", "TV", total * 0.6))
+        rows.append(row(d, "DE", "Radio", total * 0.4))
+    scale = market_scale(build_panel(media(rows)), "DE")
+    assert scale == 100.0, f"expected the median, got {scale}"
+
+
+def test_market_scale_ignores_days_the_market_was_dark():
+    """The positive-day filter, which a constant fixture leaves unexercised."""
+    totals = [200.0, 200.0, 0.0, 0.0, 200.0]
+    rows = []
+    for d, total in zip(pd.date_range("2024-01-01", periods=5), totals):
+        rows.append(row(d, "DE", "TV", total))
+    assert market_scale(build_panel(media(rows)), "DE") == 200.0
 
 
 def test_cross_market_series_divides_out_market_size():
     """Two markets 10x apart in size, running the same relative pattern, must
     produce the same cross-market series -- otherwise the large market dominates
     every comparison, which spec section 5 exists to prevent."""
+    shape = [1.0, 0.5, 2.0, 0.25, 1.0]   # varies, so equality is not trivial
     rows = []
-    for d in pd.date_range("2024-01-01", periods=5):
-        rows.append(row(d, "US", "TV", 1000.0))
-        rows.append(row(d, "FI", "TV", 100.0))
+    for d, k in zip(pd.date_range("2024-01-01", periods=5), shape):
+        rows.append(row(d, "US", "TV", 1000.0 * k))
+        rows.append(row(d, "FI", "TV", 100.0 * k))
     p = build_panel(media(rows))
     assert np.allclose(cross_market_series(p, "US", "TV").values,
                        cross_market_series(p, "FI", "TV").values)
