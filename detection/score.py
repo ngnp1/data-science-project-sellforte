@@ -154,17 +154,35 @@ def _consistency(event: DetectedEvent, panel: Panel) -> float:
     return agreeing / len(channels)
 
 
+def _select_run(event: DetectedEvent, panel: Panel):
+    """The off-run this event's run-derived sub-scores are read from.
+
+    Always routed through subject_channels() -- for every event type alike,
+    with no per-type branch -- so a single_channel event reads the run from
+    the channels that actually stopped, not the one named in `channel` that
+    is still running. Where an event has several subject channels (a dark
+    period's, or a single_channel event's), the run with the LONGEST OVERLAP
+    of the event window wins: a dark period's channels are interchangeable,
+    but this still picks out whichever of them most fully accounts for the
+    claimed window.
+    """
+    if not event.country_code:
+        return None
+    channels = subject_channels(event, panel)
+    best_run, best_overlap = None, 0
+    for ch in channels:
+        run = _covering_run(panel, event.country_code, ch, event.start, event.end)
+        if run is None:
+            continue
+        overlap = (min(run.end, event.end) - max(run.start, event.start)).days + 1
+        if overlap > best_overlap:
+            best_run, best_overlap = run, overlap
+    return best_run
+
+
 def sub_scores(event: DetectedEvent, panel: Panel) -> dict[str, float]:
     """The six named sub-scores from spec section 8, each in [0, 1]."""
-    run = None
-    if event.channel and event.country_code:
-        run = _covering_run(panel, event.country_code, event.channel,
-                            event.start, event.end)
-    elif event.country_code and event.event_type == "dark_period":
-        channels = subject_channels(event, panel)
-        if channels:
-            run = _covering_run(panel, event.country_code, channels[0],
-                                event.start, event.end)
+    run = _select_run(event, panel)
     return {
         "magnitude_evidence": _magnitude_evidence(event, panel, run),
         "duration_evidence": _duration_evidence(event),
