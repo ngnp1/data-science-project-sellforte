@@ -107,3 +107,27 @@ PULSE_LEN_IQR_RATIO = 0.5
 # Spread in onset dates across markets, in days, above which the channel is
 # reported as a staggered launch rather than coincidental start-up jitter.
 ONSET_SPREAD = 14
+
+# --- Section 8, confidence sub-scores ------------------------------------
+
+# |z| at which magnitude evidence for a step change saturates. A z of this size
+# is already overwhelming; above it the extra certainty is not worth reporting
+# as a difference.
+Z_SATURATION = 8.0
+
+# Duration evidence saturates at this multiple of MIN_DAYS. At 2 a 14-day event
+# is fully evidenced; lower makes every reportable event look equally long.
+DURATION_SATURATION_MULT = 2.0
+
+# Distinctiveness saturates at this ratio of the run's length to the series' own
+# p90 off-run. At 3 a run three times the usual gap is maximally distinctive.
+DISTINCTIVENESS_SATURATION = 3.0
+
+# Spend at zero while impressions keep flowing is the signature of tracking
+# loss, not a real pause. It is not zero, because the spend feed may simply be
+# late, but it must sit far below a corroborated stop.
+CORROBORATION_CONTRADICTED = 0.2
+
+# No impressions column, or impressions that are all zero for this series, means
+# corroboration is unavailable rather than contradicted.
+CORROBORATION_UNKNOWN = 0.6
