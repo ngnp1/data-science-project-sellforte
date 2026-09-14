@@ -55,6 +55,37 @@ def test_channel_is_none_for_market_wide_events():
     assert e.channel is None
 
 
+def test_scores_default_to_unscored_not_to_a_number():
+    """An unscored event must be distinguishable from a low-confidence one.
+    Defaulting to 0.0 would put every unscored detection in the bottom
+    reliability bin and make an unscored detector look badly calibrated
+    rather than unscored."""
+    e = ev()
+    assert e.detection_confidence is None
+    assert e.informativeness is None
+
+
+def test_validity_defaults_to_ok_with_no_reasons():
+    e = ev()
+    assert e.validity == "ok"
+    assert e.validity_reasons == ()
+
+
+def test_scores_round_trip_through_the_constructor():
+    e = DetectedEvent(
+        sid="dev_001", country_code="DE", channel="TV",
+        event_type="dark_period",
+        start=pd.Timestamp("2024-03-01"), end=pd.Timestamp("2024-04-01"),
+        detection_confidence=0.87, informativeness=0.42,
+        validity="suspect_tracking_loss",
+        validity_reasons=("spend zero while impressions continue",),
+    )
+    assert e.detection_confidence == 0.87
+    assert e.informativeness == 0.42
+    assert e.validity == "suspect_tracking_loss"
+    assert e.validity_reasons == ("spend zero while impressions continue",)
+
+
 def test_detection_model_does_not_import_the_harness():
     """The black-box boundary: detection/ must never reach into benchmark.eval."""
     import inspect

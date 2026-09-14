@@ -41,6 +41,16 @@ class DetectedEvent:
     components: tuple[tuple[pd.Timestamp, pd.Timestamp], ...] = ()
     tags: tuple[str, ...] = ()
     evidence: dict = field(default_factory=dict)
+    # Spec section 8's three scores. None means UNSCORED, which is not the same
+    # as zero: the reliability curve skips unscored detections rather than
+    # binning them at the bottom, so a placeholder here would be
+    # indistinguishable from a real low-confidence result.
+    detection_confidence: float | None = None
+    informativeness: float | None = None
+    # Spec section 8's validity gate. "ok" is the default because most events
+    # are fine; the reasons tuple is empty unless something tripped.
+    validity: str = "ok"
+    validity_reasons: tuple[str, ...] = ()
 
     @property
     def n_days(self) -> int:
