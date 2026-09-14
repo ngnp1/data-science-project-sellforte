@@ -25,7 +25,7 @@ import pandas as pd
 from detection import params
 from detection.io.panel import Panel
 from detection.model import DetectedEvent
-from detection.primitives.zero_runs import find_off_runs
+from detection.primitives.zero_runs import OffRun, find_off_runs
 
 COUNTRY_LEVEL_TYPES = frozenset({"dark_period", "single_channel"})
 
@@ -59,13 +59,17 @@ def subject_channels(event: DetectedEvent, panel: Panel) -> list[str]:
 
 
 def _magnitude_evidence(event: DetectedEvent, panel: Panel,
-                        run) -> float:
+                        run, channel: str | None) -> float:
     if event.event_type == "step_change":
         z = abs(float(event.evidence.get("z", 0.0)))
         return min(1.0, z / params.Z_SATURATION)
     if run is None:
         return 0.0
     # depth is the fraction by which spend fell; an exact zero is depth 1.
+    # Reads only `run` -- already selected from the correct subject channel by
+    # _select_run -- never event.channel; `channel` is accepted for the same
+    # signature as the other run-derived sub-scores so nothing here is
+    # tempted to reach for event.channel instead.
     return float(min(1.0, max(0.0, run.depth)))
 
 
@@ -74,18 +78,26 @@ def _duration_evidence(event: DetectedEvent) -> float:
     return float(min(1.0, event.n_days / span))
 
 
-def _distinctiveness(event: DetectedEvent, panel: Panel, run) -> float:
+def _distinctiveness(event: DetectedEvent, panel: Panel, run,
+                     channel: str | None) -> float:
     """This run's length against the p90 of the series' OTHER off-runs.
 
     Per series, never global: a 30-day stop means something quite different on a
     channel that never pauses than on one that flights every fortnight.
+
+    Reads `channel` -- the subject channel _select_run actually took `run`
+    from -- rather than event.channel. For a single_channel event the two
+    differ: event.channel names the channel still RUNNING, not the one the
+    run came from, and comparing the run's length against the wrong series'
+    gap distribution silently produced a wrong score for that event type
+    once run selection was fixed to read the correct run in the first place.
     """
-    if run is None or not event.channel:
+    if run is None or not channel:
         return 0.0
-    series = panel.series(event.country_code, event.channel)
+    series = panel.series(event.country_code, channel)
     others = [r.n_days for r in find_off_runs(series,
                                               panel.present_mask(event.country_code,
-                                                                 event.channel))
+                                                                 channel))
               if not (r.start == run.start and r.end == run.end)]
     if not others:
         return 1.0
@@ -129,7 +141,11 @@ def _corroboration(event: DetectedEvent, panel: Panel) -> float:
     return float(np.mean(scores))
 
 
-def _edge_sharpness(event: DetectedEvent, panel: Panel, run) -> float:
+def _edge_sharpness(event: DetectedEvent, panel: Panel, run,
+                    channel: str | None) -> float:
+    # Reads only `run` -- already selected from the correct subject channel --
+    # never event.channel; `channel` is accepted for the same reason as in
+    # _magnitude_evidence.
     if run is not None:
         return float(min(1.0, max(0.0, run.edge_sharpness)))
     if event.event_type == "step_change":
@@ -154,8 +170,10 @@ def _consistency(event: DetectedEvent, panel: Panel) -> float:
     return agreeing / len(channels)
 
 
-def _select_run(event: DetectedEvent, panel: Panel):
-    """The off-run this event's run-derived sub-scores are read from.
+def _select_run(event: DetectedEvent,
+                panel: Panel) -> tuple[OffRun | None, str | None]:
+    """The off-run this event's run-derived sub-scores are read from, AND
+    which subject channel it came from.
 
     Always routed through subject_channels() -- for every event type alike,
     with no per-type branch -- so a single_channel event reads the run from
@@ -165,29 +183,38 @@ def _select_run(event: DetectedEvent, panel: Panel):
     of the event window wins: a dark period's channels are interchangeable,
     but this still picks out whichever of them most fully accounts for the
     claimed window.
+
+    The channel is returned alongside the run, not just the run alone,
+    because a run without its provenance is exactly what let a run selected
+    from one channel (a single_channel event's subject) get compared, in
+    _distinctiveness, against a DIFFERENT channel's gap history (event.channel,
+    the one still running) -- the two silently drifted apart once run
+    selection started reading the correct channel but the sub-scores kept
+    reaching for event.channel on their own. Every run-derived sub-score
+    must take `channel` from here, never from event.channel.
     """
     if not event.country_code:
-        return None
+        return None, None
     channels = subject_channels(event, panel)
-    best_run, best_overlap = None, 0
+    best_run, best_channel, best_overlap = None, None, 0
     for ch in channels:
         run = _covering_run(panel, event.country_code, ch, event.start, event.end)
         if run is None:
             continue
         overlap = (min(run.end, event.end) - max(run.start, event.start)).days + 1
         if overlap > best_overlap:
-            best_run, best_overlap = run, overlap
-    return best_run
+            best_run, best_channel, best_overlap = run, ch, overlap
+    return best_run, best_channel
 
 
 def sub_scores(event: DetectedEvent, panel: Panel) -> dict[str, float]:
     """The six named sub-scores from spec section 8, each in [0, 1]."""
-    run = _select_run(event, panel)
+    run, channel = _select_run(event, panel)
     return {
-        "magnitude_evidence": _magnitude_evidence(event, panel, run),
+        "magnitude_evidence": _magnitude_evidence(event, panel, run, channel),
         "duration_evidence": _duration_evidence(event),
-        "distinctiveness": _distinctiveness(event, panel, run),
-        "edge_sharpness": _edge_sharpness(event, panel, run),
+        "distinctiveness": _distinctiveness(event, panel, run, channel),
+        "edge_sharpness": _edge_sharpness(event, panel, run, channel),
         "corroboration": _corroboration(event, panel),
         "consistency": _consistency(event, panel),
     }
