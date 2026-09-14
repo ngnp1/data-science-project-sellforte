@@ -1,4 +1,5 @@
 import json
+import pytest
 import subprocess
 from pathlib import Path
 
@@ -51,19 +52,55 @@ def test_dev_runs_freely_and_appends_history(tmp_path):
     assert last["metrics"]["f1"] == 1.0
 
 
+# Every import path by which detector code could reach the answer key.
+#
+# "benchmark.spec" is here because it is the answer key: it builds the events
+# the generator injects, so importing it hands the detector the event families
+# and their parameters directly. It also needs NO file access, which means the
+# runtime open() guard in tests/detection/test_pipeline.py cannot see it --
+# this static scan is the only thing that can. "benchmark.harness" carries
+# runner.truth_dir, which resolves a truth path without either marker string
+# appearing in the caller.
+FORBIDDEN_IMPORTS = (
+    "benchmark.eval",
+    "benchmark.spec",
+    "benchmark.harness",
+    "_truth",
+    "ground_truth",
+)
+
+
+def _truth_reaching_imports(text: str) -> list[str]:
+    """The needles present in `text`. Shared by the scan and its control."""
+    return [needle for needle in FORBIDDEN_IMPORTS if needle in text]
+
+
 def test_detection_package_has_no_import_path_to_truth():
     """Spec section 4: detector code must never be able to import a truth
-    loader. detection/ does not exist yet -- when Plan 3 creates it, this test
-    is what keeps the boundary real."""
+    loader, or anything that is equivalent to one."""
     det = ROOT / "detection"
     if not det.is_dir():
         return
     offenders = []
     for py in det.rglob("*.py"):
-        text = py.read_text()
-        if "benchmark.eval" in text or "_truth" in text or "ground_truth" in text:
-            offenders.append(str(py.relative_to(ROOT)))
+        found = _truth_reaching_imports(py.read_text())
+        if found:
+            offenders.append(f"{py.relative_to(ROOT)}: {found}")
     assert not offenders, f"detection/ reaches for truth: {offenders}"
+
+
+@pytest.mark.parametrize("line", [
+    "from benchmark.eval.truth import load_truth",
+    "from benchmark.spec.events import dark",
+    "from benchmark.harness.runner import truth_dir",
+    "path = DATASETS / 'dev_truth' / sid",
+    "df = pd.read_csv('ground_truth.csv')",
+])
+def test_the_import_scan_would_catch_a_violation(line):
+    """Positive control. A scan that cannot fail is not a gate, and this one
+    silently had a hole: benchmark.spec was unbanned for the whole of Plan 3.
+    Each line below must be caught by the scan the test above runs."""
+    assert _truth_reaching_imports(line), f"scan misses: {line}"
 
 
 def test_repeat_final_run_banners_the_report_and_increments_run_index(

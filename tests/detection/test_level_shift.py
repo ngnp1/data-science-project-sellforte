@@ -84,6 +84,29 @@ def test_a_one_day_spike_produces_no_step():
     assert find_step_episodes(s(values)) == []
 
 
+def test_a_decaying_excursion_is_rejected_by_persistence():
+    """THE persistence defence, on the only shape that actually reaches it.
+
+    A level that jumps and then DECAYS back is not a new level. The opening
+    shift clears the z gate, and it clears sharpness too -- the jump itself is
+    abrupt -- so persistence is the only filter that can reject it: PERSIST days
+    later the level has not held.
+
+    Verified by deleting the persistence block outright, not by zeroing PERSIST.
+    Zeroing relocates the check instead of disabling it, which is how this gate
+    sat with zero coverage while a mutation battery reported it healthy. The
+    earlier rise-hold-revert fixture reaches this filter but is rejected by the
+    z gate whether or not persistence runs, so it never tested anything.
+
+    Sized with literals: a 25-day decay from 3x back to 1x.
+    """
+    rng = np.random.default_rng(5)
+    values = (noisy(100.0, 120, rng)
+              + [300.0 * (0.94 ** i) for i in range(25)]
+              + noisy(100.0, 120, rng))
+    assert find_step_episodes(s(values)) == []
+
+
 def test_a_short_excursion_below_persist_is_rejected():
     rng = np.random.default_rng(5)
     values = (noisy(100.0, 120, rng) + noisy(300.0, params.PERSIST - 4, rng)
