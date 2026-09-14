@@ -545,3 +545,72 @@ def test_consistency_carries_more_weight_for_a_dark_period_than_a_step_change(mo
     step_delta = scored(step, 1.0) - scored(step, 0.0)
     assert dark_delta > step_delta
     assert dark_delta > 0.0
+
+
+def test_informativeness_orders_event_types_by_type_prior_alone():
+    """Spec section 8 asserts a RANKING, not a set of constants: "dark periods
+    (baseline readable directly), single-channel periods (unambiguous
+    attribution) and pulses (the only place adstock is visible) rank above a
+    plain step change." Pinning TYPE_PRIOR's literal values, as
+    test_params.py already does, does not test this claim: a table that is
+    flattened, reordered, or has one row copy-pasted onto another passes that
+    transcription check's neighbours fine as long as the SET of six numbers
+    it asserts is unchanged, and the dark-vs-step comparison above only ever
+    reaches the two extremes -- never the four middle values.
+
+    Every event below shares one panel, one 30-day window, and no evidence,
+    so duration_adequacy, contrast, cleanliness, control_availability and
+    sales_snr come out identical across all six: TV carries one clean,
+    full-depth off-run that every run-derived type's contrast reads (a depth
+    of exactly 1.0), and step_change reads its own maximal-contrast fallback
+    instead (magnitude_ratio is left None) -- landing on the same 1.0 by a
+    different path. type_prior is the only term left free to move the score,
+    so the ordering below is attributable to it alone."""
+    p = build({"TV": [100.0] * 60 + [0.0] * 30 + [100.0] * 60,
+               "Radio": [50.0] * 150})
+    scores = {
+        "dark_period": informativeness(
+            event(p, None, 60, 89, event_type="dark_period"), p)[0],
+        # channel="Radio" (still running) -> subject is ["TV"], the channel
+        # that actually went dark, per the single_channel inversion.
+        "single_channel": informativeness(
+            event(p, "Radio", 60, 89, event_type="single_channel"), p)[0],
+        "channel_pulse": informativeness(
+            event(p, "TV", 60, 89, event_type="channel_pulse"), p)[0],
+        "natural_holdout": informativeness(
+            event(p, "TV", 60, 89, event_type="natural_holdout"), p)[0],
+        "staggered_launch": informativeness(
+            event(p, "TV", 60, 89, event_type="staggered_launch"), p)[0],
+        "step_change": informativeness(
+            event(p, "TV", 60, 89, event_type="step_change"), p)[0],
+    }
+    assert scores["dark_period"] > scores["single_channel"]
+    assert scores["dark_period"] > scores["channel_pulse"]
+    # single_channel and channel_pulse share TYPE_PRIOR's 0.9 -- the table
+    # ties them, so the test must not assert a strict order between them.
+    assert scores["single_channel"] == pytest.approx(scores["channel_pulse"])
+    assert scores["single_channel"] > scores["natural_holdout"]
+    assert scores["channel_pulse"] > scores["natural_holdout"]
+    assert scores["natural_holdout"] > scores["staggered_launch"]
+    assert scores["staggered_launch"] > scores["step_change"]
+
+
+def test_control_availability_orders_peers_above_siblings_above_none():
+    """Spec section 8: "control availability (peers 1.0, sibling channels
+    0.7, none 0.3)" is a three-way ranking, not just two endpoints. The
+    existing control_availability test (round 0) only ever compares "peers"
+    against "none" -- collapsing sibling_channels onto none's 0.3 leaves that
+    test, and every other test in this file, green. The cross-market layer
+    genuinely emits control_available="sibling_channels", so this branch is
+    reachable in production and was simply untested."""
+    p = build({"TV": [100.0] * 60 + [0.0] * 30 + [100.0] * 60,
+               "Radio": [50.0] * 150})
+    peers = event(p, "TV", 60, 89, evidence={"control_available": "peers"})
+    siblings = event(p, "TV", 60, 89,
+                     evidence={"control_available": "sibling_channels"})
+    none_available = event(p, "TV", 60, 89,
+                           evidence={"control_available": "none"})
+    score_peers = informativeness(peers, p)[0]
+    score_siblings = informativeness(siblings, p)[0]
+    score_none = informativeness(none_available, p)[0]
+    assert score_peers > score_siblings > score_none
