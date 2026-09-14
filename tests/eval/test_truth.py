@@ -185,3 +185,60 @@ def test_loader_never_touches_the_test_split_truth(monkeypatch):
     monkeypatch.setattr(builtins, "open", guarded_open)
     monkeypatch.setattr(Path, "read_text", guarded_read_text)
     T.load_truth("dev", "dev_019")
+
+
+def test_pulses_are_grouped_by_country_AND_channel_not_by_either_alone():
+    """The grouping key is semantically unguarded: mutating its channel
+    component to a constant left the whole eval suite green, because no real
+    dev scenario has two pulse trains in one country on different channels.
+    Rather than depend on data that does not contain the case, the fixture is
+    injected: two countries x two channels, two pulses each.
+
+    Grouped by country alone, or by channel alone, this collapses to two
+    groups of four instead of four groups of two -- which is the pulse
+    disaster (a grouped detection scoring IoU ~0.118 against a mis-sized
+    group) reintroduced one level down.
+    """
+    rows = []
+    for country in ("DE", "FR"):
+        for channel in ("TV", "Radio"):
+            for i, start in enumerate((10, 50)):
+                rows.append({
+                    "pattern_id": f"{country}_{channel}_{i}",
+                    "pattern_type": "channel_pulse",
+                    "country": country,
+                    "channel": channel,
+                    "start_day": start,
+                    "end_day": start + 14,
+                    "multiplier": 0.0,
+                    "description": f"pulse {i + 1} of 2",
+                })
+
+    events = T._group_pulses("dev_synthetic", rows)
+
+    assert len(events) == 4, (
+        f"expected one grouped pulse train per (country, channel), got "
+        f"{[(e.country_code, e.channel) for e in events]}")
+    assert {(e.country_code, e.channel) for e in events} == {
+        ("DE", "TV"), ("DE", "Radio"), ("FR", "TV"), ("FR", "Radio")}
+    for e in events:
+        assert len(e.components) == 2, (e.country_code, e.channel)
+        assert e.n_days == 54          # day 10 through day 63 inclusive
+
+
+def test_a_pulse_train_split_across_channels_is_never_merged():
+    """The narrower half of the same guard, isolated: one country, two
+    channels. Merging them would produce a single span covering both and a
+    component count that contradicts the truth file's own 'pulse i of n'."""
+    rows = [
+        {"pattern_id": "DE_TV_0", "pattern_type": "channel_pulse",
+         "country": "DE", "channel": "TV", "start_day": 0, "end_day": 14,
+         "multiplier": 0.0, "description": "pulse 1 of 1"},
+        {"pattern_id": "DE_RADIO_0", "pattern_type": "channel_pulse",
+         "country": "DE", "channel": "Radio", "start_day": 100,
+         "end_day": 114, "multiplier": 0.0, "description": "pulse 1 of 1"},
+    ]
+    events = T._group_pulses("dev_synthetic", rows)
+    assert len(events) == 2
+    assert {e.channel for e in events} == {"TV", "Radio"}
+    assert all(e.n_days == 14 for e in events)

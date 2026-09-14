@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from benchmark.eval import truth as T
-from benchmark.eval.breakdowns import breakdown_by
+from benchmark.eval.breakdowns import breakdown_by, event_breakdowns
 from benchmark.eval.matching import match_events
 from benchmark.eval.metrics import evaluate_scenario, false_positive_rate, prf
 from benchmark.eval.model import Event
@@ -83,4 +83,9 @@ def evaluate_split(detector, split: str, root: Path | None = None,
         "per_scenario": per_scenario,
         "breakdowns": {ax: breakdown_by(per_scenario, meta_by_sid, ax)
                        for ax in BREAKDOWN_AXES},
+        # Spec section 9 item 10's duration, magnitude and near-zero-vs-exact
+        # -zero axes, which meta.json cannot express -- they live on the
+        # individual truth events, so they are bucketed per event rather than
+        # per scenario.
+        "event_breakdowns": event_breakdowns(overall_match),
     }

@@ -168,3 +168,57 @@ def test_never_detect_does_not_report_flawless_boundary_localisation():
     boundary = md.split("## Boundary error")[1].split("##")[0]
     assert "n/a" in boundary
     assert "0.0" not in boundary
+
+
+def test_report_renders_the_event_level_breakdown_axes():
+    """I7. Spec section 9 item 10 names duration, magnitude and near-zero vs
+    exact-zero. They cannot be computed from meta.json, so they are bucketed
+    per truth event -- and they have to reach the RENDERED report, which is
+    what a later plan's author reads, not the results dict."""
+    results = _minimal_results({})
+    results["event_breakdowns"] = {
+        "duration": [
+            {"value": "<14 days", "n_events": 4, "n_matched": 1, "recall": 0.25},
+            {"value": "90+ days", "n_events": 6, "n_matched": 6, "recall": 1.0},
+        ],
+        "zero_kind": [
+            {"value": "exact zero", "n_events": 15, "n_matched": 15, "recall": 1.0},
+            {"value": "near zero", "n_events": 5, "n_matched": 1, "recall": 0.2},
+        ],
+    }
+    md = render_markdown(results)
+    assert "## Event-level breakdowns" in md
+    assert "### duration" in md and "### zero_kind" in md
+    assert "| <14 days | 4 | 1 | 0.250 |" in md
+    assert "| near zero | 5 | 1 | 0.200 |" in md
+    # Recall-only, and the report must say why rather than leaving a reader to
+    # wonder where precision went.
+    assert "recall-only" in md.lower()
+
+
+def test_event_breakdowns_reach_the_report_from_a_real_split():
+    """End to end: the axes are computed by the runner and rendered, not just
+    renderable in principle."""
+    got = evaluate_split(D.shifted_oracle(10), "dev", sids=SOME)
+    md = render_markdown(got)
+    assert "## Event-level breakdowns" in md
+    for axis in ("duration", "magnitude", "zero_kind"):
+        assert f"### {axis}" in md
+    assert "exact zero" in md
+
+
+def test_the_report_warns_that_f1_cannot_separate_the_two_pathologies():
+    """I9. The confounded-axis warnings travel with their tables; this one --
+    that `never_detect` and `detect_everything` are indistinguishable on
+    P/R/F1 -- landed only in the harness README, which the author of a later
+    report has no reason to open. It has to sit beside the headline numbers
+    themselves."""
+    md = render_markdown(_minimal_results({}))
+    headline = md.split("## Headline")[1].split("## Boundary error")[0]
+    lowered = headline.lower()
+    assert "f1" in lowered
+    assert "false-positive rate" in lowered or "false positive rate" in lowered
+    assert any(w in lowered for w in ("cannot tell", "cannot distinguish")), (
+        "the headline does not warn that P/R/F1 cannot separate a silent "
+        "detector from an indiscriminate one")
+    assert "standalone headline" in lowered

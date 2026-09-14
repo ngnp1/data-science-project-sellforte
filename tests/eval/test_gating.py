@@ -88,8 +88,6 @@ def test_repeat_final_run_banners_the_report_and_increments_run_index(
     # announce.
     assert run_final._prior_run_count() == 0
     assert run_final._repeat_run_banner(1, 0) == ""
-    report = run_final._repeat_run_banner(1, 0) + "# Evaluation body"
-    assert report == "# Evaluation body"
 
     # Seed one fake prior record -- never touches the real final_runs.jsonl.
     fake_final_runs.write_text(json.dumps({"run_index": 1}) + "\n")
@@ -104,16 +102,14 @@ def test_repeat_final_run_banners_the_report_and_increments_run_index(
     assert "1 prior" in banner
     assert "final_runs.jsonl" in banner
 
-    # The banner must sit at the very top of the composed report.
-    report = banner + "# Evaluation body"
-    assert report.startswith(banner)
-    assert report.index(banner) == 0
-    assert "# Evaluation body" in report
-
-    # And the record itself must be self-describing -- run_index, not just a
-    # line count a reader has to go compute.
-    record = {"run_index": run_index}
-    assert record["run_index"] == 2
+    # Where the banner ends up in the composed report, and that the record is
+    # self-describing, are properties of run_final itself -- see
+    # test_compose_report_puts_the_repeat_banner_above_the_report and
+    # test_build_record_is_self_describing below. Asserting them against
+    # locally built strings and dicts here (the earlier
+    # `assert (banner + body).startswith(banner)` and
+    # `assert {"run_index": 2}["run_index"] == 2`) tested Python, not this
+    # program, and could not fail whatever run_final did.
 
     # A third record makes it #3, not stuck at #2.
     fake_final_runs.write_text(
