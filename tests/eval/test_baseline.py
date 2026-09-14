@@ -27,3 +27,16 @@ def test_detect_everything_is_punished_where_it_should_be():
     got = evaluate_split(D.detect_everything, "dev")
     assert got["overall"]["precision"] < 0.2
     assert got["null_fp_rate"] > 0.0
+
+
+def test_f1_alone_cannot_tell_never_detect_from_detect_everything():
+    """Pins the fact the README explains: never_detect (reports nothing) and
+    detect_everything (reports everything) are opposite pathologies but score
+    identically on precision/recall/F1. Only the null-scenario false-positive
+    rate separates them -- so F1 must never be read as a standalone headline
+    for this benchmark. If this stops being true, the README's warning stops
+    being accurate."""
+    never = evaluate_split(D.never_detect, "dev")
+    everything = evaluate_split(D.detect_everything, "dev")
+    assert never["overall"]["f1"] == everything["overall"]["f1"]
+    assert never["null_fp_rate"] != everything["null_fp_rate"]
