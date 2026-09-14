@@ -56,6 +56,17 @@ PERSIST = 14
 SHARPNESS = 0.6
 SHARPNESS_WINDOW = 3
 
+# Fraction of the opening delta the level must still show PERSIST days later
+# for the shift to count as held. Higher rejects real steps that drift back
+# slightly; lower lets a decaying spike pass as a step.
+PERSIST_FRACTION = 0.5
+
+# An opposite-sign shift closes a step episode only if its magnitude is
+# comparable -- within this factor either way of the opening shift. Wider pairs
+# a step's end with an unrelated later shift; narrower leaves real episodes
+# open-ended, running to the series end.
+EPISODE_MATCH_BAND = 2.0
+
 # Centred rolling median width used for level work, to remove day-of-week
 # structure. Run detection stays on raw daily values so boundaries land on
 # exact dates.
