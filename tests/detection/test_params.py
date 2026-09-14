@@ -1,3 +1,5 @@
+import pytest
+
 from detection import params
 
 
@@ -29,6 +31,55 @@ def test_every_documented_parameter_exists_with_the_spec_value():
     assert params.DISTINCTIVENESS_SATURATION == 3.0
     assert params.CORROBORATION_CONTRADICTED == 0.2
     assert params.CORROBORATION_UNKNOWN == 0.6
+    assert params.ADSTOCK_HALF_LIFE == 7.0
+    assert params.ADSTOCK_WINDOWS_FOR_FULL_CREDIT == 4.0
+    assert params.CENSORING_PENALTY == 0.7
+    assert params.CONFOUNDED_PENALTY == 0.6
+
+
+def test_confidence_and_informativeness_weight_tables_have_the_spec_values():
+    """Section 8's weight tables, pinned the same way the scalar thresholds
+    above are: a deliberate act to change, not a typo to slip past silently."""
+    assert params.CONFIDENCE_WEIGHTS["dark_period"] == {
+        "magnitude_evidence": 0.2, "duration_evidence": 0.15,
+        "distinctiveness": 0.15, "edge_sharpness": 0.1,
+        "corroboration": 0.15, "consistency": 0.25}
+    assert params.CONFIDENCE_WEIGHTS["single_channel"] == \
+        params.CONFIDENCE_WEIGHTS["dark_period"]
+    assert params.CONFIDENCE_WEIGHTS["natural_holdout"] == {
+        "magnitude_evidence": 0.25, "duration_evidence": 0.2,
+        "distinctiveness": 0.25, "edge_sharpness": 0.1,
+        "corroboration": 0.2, "consistency": 0.0}
+    assert params.CONFIDENCE_WEIGHTS["channel_pulse"] == {
+        "magnitude_evidence": 0.25, "duration_evidence": 0.1,
+        "distinctiveness": 0.3, "edge_sharpness": 0.15,
+        "corroboration": 0.2, "consistency": 0.0}
+    assert params.CONFIDENCE_WEIGHTS["staggered_launch"] == {
+        "magnitude_evidence": 0.2, "duration_evidence": 0.2,
+        "distinctiveness": 0.2, "edge_sharpness": 0.1,
+        "corroboration": 0.3, "consistency": 0.0}
+    assert params.CONFIDENCE_WEIGHTS["step_change"] == {
+        "magnitude_evidence": 0.45, "duration_evidence": 0.2,
+        "distinctiveness": 0.0, "edge_sharpness": 0.25,
+        "corroboration": 0.1, "consistency": 0.0}
+    assert params.TYPE_PRIOR == {
+        "dark_period": 1.0, "single_channel": 0.9, "channel_pulse": 0.9,
+        "natural_holdout": 0.75, "staggered_launch": 0.6, "step_change": 0.45}
+    assert params.CONTROL_SCORE == {
+        "peers": 1.0, "sibling_channels": 0.7, "none": 0.3}
+    assert params.INFORMATIVENESS_WEIGHTS == {
+        "duration_adequacy": 0.25, "contrast": 0.15, "cleanliness": 0.15,
+        "control_availability": 0.2, "type_prior": 0.25}
+
+
+def test_confidence_weight_rows_name_exactly_the_six_sub_scores():
+    from detection.model import EVENT_TYPES
+    names = {"magnitude_evidence", "duration_evidence", "distinctiveness",
+             "edge_sharpness", "corroboration", "consistency"}
+    assert set(params.CONFIDENCE_WEIGHTS) == set(EVENT_TYPES)
+    for event_type, weights in params.CONFIDENCE_WEIGHTS.items():
+        assert set(weights) == names, event_type
+        assert sum(weights.values()) == pytest.approx(1.0), event_type
 
 
 def test_window_parameters_are_whole_weeks():

@@ -218,3 +218,92 @@ def sub_scores(event: DetectedEvent, panel: Panel) -> dict[str, float]:
         "corroboration": _corroboration(event, panel),
         "consistency": _consistency(event, panel),
     }
+
+
+def confidence(event: DetectedEvent, panel: Panel
+              ) -> tuple[float, dict[str, float]]:
+    """Spec section 8's detection_confidence, plus the sub-scores behind it.
+
+    Both are returned together deliberately: the number and its justification
+    must come from the same computation, or the explanation stops being an
+    explanation. Weights differ by event type (params.CONFIDENCE_WEIGHTS)
+    because the evidence available differs -- a dark period makes a claim
+    about every other channel and a step change makes none, for instance.
+    """
+    parts = sub_scores(event, panel)
+    weights = params.CONFIDENCE_WEIGHTS[event.event_type]
+    score = sum(parts[name] * weight for name, weight in weights.items())
+    return float(min(1.0, max(0.0, score))), parts
+
+
+def _duration_adequacy(event: DetectedEvent) -> float:
+    """Can this window show adstock decay at all?
+
+    A pause shorter than a few assumed half-lives (params.ADSTOCK_HALF_LIFE)
+    cannot reveal the decay it is supposed to expose, however confident we are
+    that it happened. Saturates once the window covers
+    params.ADSTOCK_WINDOWS_FOR_FULL_CREDIT half-lives.
+    """
+    span = params.ADSTOCK_HALF_LIFE * params.ADSTOCK_WINDOWS_FOR_FULL_CREDIT
+    return float(min(1.0, event.n_days / span))
+
+
+def _contrast(event: DetectedEvent, panel: Panel) -> float:
+    """How far the window departs from the series' normal level.
+
+    A step change never stops the channel, so there is no run depth to read;
+    it instead reads how far the ratio carried the level, on the same
+    saturating scale distinctiveness uses (params.DISTINCTIVENESS_SATURATION),
+    since both describe how far a change sits from the ordinary case. Every
+    other event type reads the depth of the off-run it sits on -- via
+    _select_run, never event.channel directly: a dark_period's `channel` is
+    None by design (it names no single channel; see detection/model.py), so
+    reading event.channel here would silently zero out contrast for every
+    dark period, the same channel-naming shortcut this module's own
+    docstring already warns has produced real defects twice before.
+    """
+    if event.event_type == "step_change":
+        ratio = event.magnitude_ratio
+        if ratio is None or ratio <= 0:
+            return 1.0        # out of zero: maximal contrast
+        return float(min(1.0, abs(np.log(ratio)) / np.log(params.DISTINCTIVENESS_SATURATION)))
+    run, _ = _select_run(event, panel)
+    return float(min(1.0, max(0.0, run.depth))) if run is not None else 0.0
+
+
+def _cleanliness(event: DetectedEvent) -> float:
+    """Penalty when another event overlaps and confounds the window."""
+    return params.CONFOUNDED_PENALTY if "confounded" in event.tags else 1.0
+
+
+def _control_availability(event: DetectedEvent) -> float:
+    """How the window can be checked against an unaffected baseline.
+
+    Reads the answer the cross-market layer already worked out (peers,
+    sibling channels, or none) rather than re-deriving it here.
+    """
+    control = event.evidence.get("control_available", "none")
+    return params.CONTROL_SCORE.get(control, params.CONTROL_SCORE["none"])
+
+
+def informativeness(event: DetectedEvent, panel: Panel
+                    ) -> tuple[float, dict[str, float]]:
+    """Spec section 8's informativeness, plus its drivers.
+
+    This is what ranking uses. It answers "how useful is this?", which is a
+    different question from "how sure am I?" -- a genuine but uninformative
+    global pause scores high on confidence and low here, and collapsing the
+    two is the standard mistake the spec calls out.
+    """
+    parts = {
+        "duration_adequacy": _duration_adequacy(event),
+        "contrast": _contrast(event, panel),
+        "cleanliness": _cleanliness(event),
+        "control_availability": _control_availability(event),
+        "type_prior": params.TYPE_PRIOR[event.event_type],
+    }
+    weights = params.INFORMATIVENESS_WEIGHTS
+    score = sum(parts[name] * weight for name, weight in weights.items())
+    if event.evidence.get("censored_start") or event.evidence.get("censored_end"):
+        score *= params.CENSORING_PENALTY
+    return float(min(1.0, max(0.0, score))), parts

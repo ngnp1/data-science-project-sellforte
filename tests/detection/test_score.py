@@ -5,7 +5,7 @@ import pytest
 from detection import params
 from detection.io.panel import build_panel
 from detection.model import DetectedEvent
-from detection.score import sub_scores
+from detection.score import confidence, informativeness, sub_scores
 
 COLS = ["date", "ad_platform", "advertising_channel", "campaign_name",
         "campaign_id", "media_investment", "clicks", "impressions",
@@ -311,3 +311,160 @@ def test_subject_channels_is_public_and_shared_across_modules():
     # OTHER channel in the market -- the inversion the ruling calls out.
     e = event(p, "Radio", 60, 89, event_type="single_channel")
     assert subject_channels(e, p) == ["TV"]
+
+
+def test_confidence_weights_sum_to_one_for_every_event_type():
+    """A row that does not sum to 1 silently rescales that type's confidence
+    against every other type, which would corrupt the calibration."""
+    from detection.model import EVENT_TYPES
+    assert set(params.CONFIDENCE_WEIGHTS) == set(EVENT_TYPES)
+    for event_type, weights in params.CONFIDENCE_WEIGHTS.items():
+        assert sum(weights.values()) == pytest.approx(1.0), event_type
+
+
+def test_confidence_weights_name_exactly_the_six_sub_scores():
+    p = build({"TV": [100.0] * 60 + [0.0] * 30 + [100.0] * 60,
+               "Radio": [50.0] * 150})
+    names = set(sub_scores(event(p, "TV", 60, 89), p))
+    for event_type, weights in params.CONFIDENCE_WEIGHTS.items():
+        assert set(weights) == names, event_type
+
+
+def test_confidence_is_the_weighted_mean_of_the_reported_sub_scores():
+    """The returned sub-scores must be the ones that produced the number.
+    Reporting one set and scoring another is how an explanation becomes a lie.
+
+    This recomputes from params.CONFIDENCE_WEIGHTS, the same dict the
+    implementation reads -- so it is deliberately NOT a check on the weight
+    VALUES (those are covered by test_confidence_weights_sum_to_one_...,
+    test_confidence_weights_name_exactly_..., and the ordering tests below).
+    What it does catch: confidence() scoring a sub_scores() call that differs
+    from the parts it returns, indexing the wrong event type's row, missing a
+    term from the sum, or skipping the [0, 1] clip -- all of which would move
+    `score` away from `expected` while `weights` and `parts` stay identical on
+    both sides."""
+    p = build({"TV": [100.0] * 60 + [0.0] * 30 + [100.0] * 60,
+               "Radio": [50.0] * 150})
+    e = event(p, "TV", 60, 89)
+    score, parts = confidence(e, p)
+    weights = params.CONFIDENCE_WEIGHTS["natural_holdout"]
+    expected = sum(parts[k] * weights[k] for k in weights)
+    assert score == pytest.approx(expected)
+    assert 0.0 <= score <= 1.0
+
+
+def test_a_clean_long_exact_zero_outscores_a_short_shallow_one():
+    """The ordering is the whole point of the score. If this inverts, ranking
+    by confidence is worse than not ranking."""
+    strong = build({"TV": [100.0] * 60 + [0.0] * 40 + [100.0] * 50,
+                    "Radio": [50.0] * 150})
+    weak = build({"TV": [100.0] * 60 + [9.0] * 8 + [100.0] * 82,
+                  "Radio": [50.0] * 150})
+    assert (confidence(event(strong, "TV", 60, 99), strong)[0]
+            > confidence(event(weak, "TV", 60, 67), weak)[0])
+
+
+def test_tracking_loss_lowers_confidence_against_an_identical_clean_event():
+    """Same window, same depth, same duration -- the ONLY difference is that
+    impressions kept flowing. Confidence must notice."""
+    clean = build({"TV": [100.0] * 60 + [0.0] * 30 + [100.0] * 60,
+                   "Radio": [50.0] * 150})
+    tracked = build({"TV": [100.0] * 60 + [0.0] * 30 + [100.0] * 60,
+                     "Radio": [50.0] * 150},
+                    impressions_by_channel={"TV": [100.0] * 150})
+    assert (confidence(event(tracked, "TV", 60, 89), tracked)[0]
+            < confidence(event(clean, "TV", 60, 89), clean)[0])
+
+
+def test_informativeness_prefers_a_dark_period_to_a_step_of_equal_length():
+    """Spec section 8's type prior: a dark period lets the baseline be read
+    directly, a step change does not."""
+    p = build({"TV": [100.0] * 60 + [0.0] * 40 + [100.0] * 50,
+               "Radio": [50.0] * 150})
+    dark = event(p, None, 60, 99, event_type="dark_period")
+    step = event(p, "TV", 60, 99, event_type="step_change",
+                 evidence={"z": 6.0})
+    assert informativeness(dark, p)[0] > informativeness(step, p)[0]
+
+
+def test_a_window_too_short_to_show_adstock_decay_scores_low_duration():
+    """Sized with literals against ADSTOCK_HALF_LIFE asserted, not derived."""
+    assert params.ADSTOCK_HALF_LIFE >= 5.0
+    # A 40-day window must saturate duration_adequacy regardless of the exact
+    # half-life/window-count values, as long as they stay within this bound --
+    # pinned here rather than recomputed from the live parameters.
+    assert params.ADSTOCK_HALF_LIFE * params.ADSTOCK_WINDOWS_FOR_FULL_CREDIT <= 40.0
+    p = build({"TV": [100.0] * 60 + [0.0] * 8 + [100.0] * 82,
+               "Radio": [50.0] * 150})
+    long_p = build({"TV": [100.0] * 60 + [0.0] * 40 + [100.0] * 50,
+                    "Radio": [50.0] * 150})
+    _, short_parts = informativeness(event(p, "TV", 60, 67), p)
+    _, long_parts = informativeness(event(long_p, "TV", 60, 99), long_p)
+    assert short_parts["duration_adequacy"] < long_parts["duration_adequacy"]
+    assert long_parts["duration_adequacy"] == 1.0
+
+
+def test_control_availability_follows_the_cross_market_tag():
+    """The cross-market layer already worked out whether peers were running;
+    informativeness must use that answer rather than guessing again."""
+    p = build({"TV": [100.0] * 60 + [0.0] * 30 + [100.0] * 60,
+               "Radio": [50.0] * 150})
+    with_peers = event(p, "TV", 60, 89, evidence={"control_available": "peers"})
+    without = event(p, "TV", 60, 89, evidence={"control_available": "none"})
+    assert informativeness(with_peers, p)[0] > informativeness(without, p)[0]
+
+
+def test_a_censored_event_is_worth_less_than_the_same_event_fully_observed():
+    """An event running to the edge of the series has unknown true extent."""
+    p = build({"TV": [0.0] * 40 + [100.0] * 110, "Radio": [50.0] * 150})
+    censored = event(p, "TV", 0, 39, evidence={"censored_start": True})
+    clean_p = build({"TV": [100.0] * 60 + [0.0] * 40 + [100.0] * 50,
+                     "Radio": [50.0] * 150})
+    clean = event(clean_p, "TV", 60, 99)
+    assert informativeness(censored, p)[0] < informativeness(clean, clean_p)[0]
+
+
+def test_a_confounded_event_is_worth_less_than_the_same_event_clean():
+    """The brief that specified these tests never exercised the cleanliness
+    driver at all -- `tags=("confounded",)` never appeared anywhere in this
+    file, so CONFOUNDED_PENALTY could be set to 1.0 (a no-op) and nothing
+    here would fail. Added to close that hole.
+
+    Asserted against the literal 0.6, not params.CONFOUNDED_PENALTY:
+    test_params.py pins CONFOUNDED_PENALTY to 0.6, so 0.6 is the correct
+    literal here, and a mutation to the parameter changes the actual result
+    without moving this expectation."""
+    assert params.CONFOUNDED_PENALTY == 0.6
+    p = build({"TV": [100.0] * 60 + [0.0] * 30 + [100.0] * 60,
+               "Radio": [50.0] * 150})
+    clean = event(p, "TV", 60, 89)
+    confounded = event(p, "TV", 60, 89, tags=("confounded",))
+    _, confounded_parts = informativeness(confounded, p)
+    assert confounded_parts["cleanliness"] == pytest.approx(0.6)
+    assert informativeness(confounded, p)[0] < informativeness(clean, p)[0]
+
+
+def test_contrast_for_a_step_change_reads_the_ratio_not_a_run_depth():
+    """A step change never stops the channel, so there is no off-run for
+    contrast to read a depth from -- it must fall back to how far |log(ratio)|
+    carries the level, on the same saturating scale distinctiveness uses.
+
+    magnitude_ratio is the literal 3 ** 0.5, chosen so that, WITH
+    DISTINCTIVENESS_SATURATION pinned to 3.0 by test_params.py,
+    |log(ratio)| / log(3.0) works out to the literal 0.5 -- half of the
+    saturation input produces half credit. The expected value does not move
+    if DISTINCTIVENESS_SATURATION is mutated; the actual result does."""
+    assert params.DISTINCTIVENESS_SATURATION == 3.0
+    p = build({"TV": [100.0] * 75 + [300.0] * 75, "Radio": [50.0] * 150})
+    e = event(p, "TV", 75, 149, event_type="step_change",
+              magnitude_ratio=3 ** 0.5, evidence={"z": 6.0})
+    _, parts = informativeness(e, p)
+    assert parts["contrast"] == pytest.approx(0.5)
+
+
+def test_informativeness_is_bounded_and_reports_its_drivers():
+    p = build({"TV": [100.0] * 60 + [0.0] * 30 + [100.0] * 60,
+               "Radio": [50.0] * 150})
+    score, parts = informativeness(event(p, "TV", 60, 89), p)
+    assert 0.0 <= score <= 1.0
+    assert set(parts) == set(params.INFORMATIVENESS_WEIGHTS)

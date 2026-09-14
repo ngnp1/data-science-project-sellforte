@@ -131,3 +131,71 @@ CORROBORATION_CONTRADICTED = 0.2
 # No impressions column, or impressions that are all zero for this series, means
 # corroboration is unavailable rather than contradicted.
 CORROBORATION_UNKNOWN = 0.6
+
+# Confidence sub-score weights per event type. They differ because the evidence
+# differs: a dark period's whole claim is that every channel stopped together,
+# so consistency carries real weight there and none at all for a step change,
+# which makes no claim about its neighbours. Each row sums to 1.
+CONFIDENCE_WEIGHTS = {
+    "dark_period": {"magnitude_evidence": 0.2, "duration_evidence": 0.15,
+                    "distinctiveness": 0.15, "edge_sharpness": 0.1,
+                    "corroboration": 0.15, "consistency": 0.25},
+    "single_channel": {"magnitude_evidence": 0.2, "duration_evidence": 0.15,
+                       "distinctiveness": 0.15, "edge_sharpness": 0.1,
+                       "corroboration": 0.15, "consistency": 0.25},
+    "natural_holdout": {"magnitude_evidence": 0.25, "duration_evidence": 0.2,
+                        "distinctiveness": 0.25, "edge_sharpness": 0.1,
+                        "corroboration": 0.2, "consistency": 0.0},
+    "channel_pulse": {"magnitude_evidence": 0.25, "duration_evidence": 0.1,
+                      "distinctiveness": 0.3, "edge_sharpness": 0.15,
+                      "corroboration": 0.2, "consistency": 0.0},
+    "staggered_launch": {"magnitude_evidence": 0.2, "duration_evidence": 0.2,
+                         "distinctiveness": 0.2, "edge_sharpness": 0.1,
+                         "corroboration": 0.3, "consistency": 0.0},
+    "step_change": {"magnitude_evidence": 0.45, "duration_evidence": 0.2,
+                    "distinctiveness": 0.0, "edge_sharpness": 0.25,
+                    "corroboration": 0.1, "consistency": 0.0},
+}
+
+# --- Section 8, informativeness ------------------------------------------
+
+# Type prior. Dark periods read the baseline directly, single-channel periods
+# give unambiguous attribution, and pulses are the only place adstock decay is
+# observable -- so all three outrank a plain step change for an analyst
+# choosing what to look at.
+TYPE_PRIOR = {
+    "dark_period": 1.0,
+    "single_channel": 0.9,
+    "channel_pulse": 0.9,
+    "natural_holdout": 0.75,
+    "staggered_launch": 0.6,
+    "step_change": 0.45,
+}
+
+# Control availability, spec section 8: peers, then sibling channels, then none.
+CONTROL_SCORE = {"peers": 1.0, "sibling_channels": 0.7, "none": 0.3}
+
+# Informativeness driver weights. One row, not per type -- the type's own
+# influence enters through TYPE_PRIOR.
+INFORMATIVENESS_WEIGHTS = {
+    "duration_adequacy": 0.25,
+    "contrast": 0.15,
+    "cleanliness": 0.15,
+    "control_availability": 0.2,
+    "type_prior": 0.25,
+}
+
+# Assumed adstock half-life in days. A window shorter than a few half-lives
+# cannot show the decay it is supposed to reveal. Stated as an assumption
+# because the real value is a modelling question, not a measurement.
+ADSTOCK_HALF_LIFE = 7.0
+
+# Informativeness saturates once the window covers this many half-lives.
+ADSTOCK_WINDOWS_FOR_FULL_CREDIT = 4.0
+
+# Multiplier applied when the event is censored at a series edge -- its true
+# extent is unknown, so it is worth less than the same event fully observed.
+CENSORING_PENALTY = 0.7
+
+# Multiplier applied when another event overlaps the window and confounds it.
+CONFOUNDED_PENALTY = 0.6
