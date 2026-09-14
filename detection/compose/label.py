@@ -150,7 +150,8 @@ def _step_events(panel: Panel, country: str, sid: str,
                        in find_off_runs(panel.series(country, ch),
                                         panel.present_mask(country, ch))
                        if r.notable]
-        for ep in find_step_episodes(panel.series(country, ch)):
+        for ep in find_step_episodes(panel.series(country, ch),
+                                     exclude=off_windows):
             # No MIN_DAYS floor here, and none is reachable: find_level_shifts
             # keeps only one shift per W-wide neighbourhood, so a closed
             # episode spans at least W days and an open-ended one runs to the

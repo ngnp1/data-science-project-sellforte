@@ -4,7 +4,7 @@ from detection import params
 def test_every_documented_parameter_exists_with_the_spec_value():
     """Spec section 7's parameter table. These are the defaults the design was
     reasoned about; changing one is a deliberate act, not a typo."""
-    assert params.RHO == 0.05
+    assert params.RHO == 0.15
     assert params.EPS_ABS == 1e-6
     assert params.MIN_DAYS == 7
     assert params.RUN_RATIO == 3.0

@@ -121,8 +121,32 @@ def find_level_shifts(s: pd.Series) -> list[LevelShift]:
     return sorted(kept, key=lambda c: c.index)
 
 
-def find_step_episodes(s: pd.Series) -> list[StepEpisode]:
+def find_step_episodes(
+    s: pd.Series,
+    exclude: list[tuple[pd.Timestamp, pd.Timestamp]] | None = None,
+) -> list[StepEpisode]:
+    """Pair opposing level shifts into episodes.
+
+    `exclude` names windows where the channel was off, and the shifts inside
+    them must be removed BEFORE pairing rather than after.
+
+    Pairing is greedy in index order, so the drop INTO an off-window claims the
+    rise OUT of it as its reversal. When a genuine step follows the restart --
+    the benchmark's back_to_back shape -- that rise is also the step's opening
+    shift, so the step is left holding only its closing shift, becomes
+    open-ended, and is dropped. Filtering completed episodes cannot recover it:
+    by then the pairing has already gone wrong.
+
+    Only the drop in is excluded, NOT the rise out. The drop is an artefact of
+    the channel stopping. The rise carries real information -- the level after
+    the restart is compared against the level before the pause, so a channel
+    that comes back at three times its old budget shows that here, and it is the
+    only shift that can open the step that follows.
+    """
     shifts = find_level_shifts(s)
+    if exclude:
+        shifts = [sh for sh in shifts
+                  if not any(lo <= sh.at < hi for lo, hi in exclude)]
     if not shifts:
         return []
 
@@ -138,8 +162,16 @@ def find_step_episodes(s: pd.Series) -> list[StepEpisode]:
             other = shifts[j]
             # Opposite sign and comparable magnitude closes an episode.
             band = params.EPISODE_MATCH_BAND
-            if (np.sign(other.delta) != np.sign(up.delta)
-                    and 1 / band <= abs(other.delta / up.delta) <= band):
+            # A shift that rises OUT OF zero has no comparable magnitude: in log
+            # space it is unboundedly large, so the band can never match it with
+            # the ordinary closing shift, and the episode is left open-ended and
+            # dropped. That is the back_to_back shape -- a holdout, then a step.
+            # Its magnitude is already reported as None for the same reason
+            # (there is no finite ratio out of zero), so pair it on direction
+            # alone and let the closing shift supply the extent.
+            comparable = (up.ratio is None
+                          or 1 / band <= abs(other.delta / up.delta) <= band)
+            if np.sign(other.delta) != np.sign(up.delta) and comparable:
                 partner = j
                 break
         if partner is not None:

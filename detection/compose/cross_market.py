@@ -22,6 +22,27 @@ Two rules govern which peers get a vote:
 It also owns staggered launches, and FANS THEM OUT to one event per market.
 The benchmark's truth is per-market, so a country-less panel event matches
 nothing; benchmark/eval/README.md states this is the detector's obligation.
+
+WHY PEER COMPARISON IS DONE ON off_mask AND NOT ON A RESCALED SERIES
+--------------------------------------------------------------------
+Spec section 7 describes the cross-market layer over the market-scale-normalized
+series, and this module compares binary off/on masks on raw spend instead. The
+deviation is in the letter, not the intent, and the intent is the requirement
+that a 15x larger market must not dominate the comparison.
+
+off_mask thresholds each series at RHO * active_level(s), where active_level is
+that series' OWN median positive spend. Market size therefore cancels before the
+comparison begins: dividing by market_scale first and then applying a threshold
+proportional to the same series' own level is arithmetically a no-op. The
+question this layer asks -- "were my peers running while I was dark?" -- is
+already scale-free.
+
+That equivalence holds only for the on/off question. A cross-market comparison
+of MAGNITUDES (did this market cut spend harder than its peers?) is not
+scale-free and would need the normalized series. cross_market_series() and
+channel_share() exist and are tested for exactly that, and have no caller in the
+current pipeline: they are for the magnitude-aware comparisons in the next plan,
+not dead code left behind.
 """
 from __future__ import annotations
 

@@ -3,6 +3,7 @@ import pandas as pd
 
 from detection import params
 from detection.primitives.level_shift import find_level_shifts, find_step_episodes
+from detection.primitives.zero_runs import find_off_runs
 
 
 def s(values, start="2024-01-01"):
@@ -210,3 +211,48 @@ def test_a_level_that_barely_holds_is_rejected_by_persist_fraction():
                     if 70 <= sh.index <= 90]
     assert onset_shifts == [], (
         "a level that gives back almost all of its move has not held")
+
+
+def test_a_step_following_a_holdout_is_not_swallowed_by_the_pairing():
+    """The back_to_back shape, which exists on both splits: a holdout, then a
+    step change starting the day the channel comes back.
+
+    Three shifts are detected -- the drop into the holdout, the rise out of it,
+    and the step's close. Greedy pairing used to let the drop claim the rise as
+    its reversal, leaving the step holding only its closing shift; it went
+    open-ended and was dropped, so the step vanished even though every shift
+    that defines it was found. Passing the off-window excludes the drop, and the
+    rise (which has no finite ratio, coming out of zero) pairs with the close on
+    direction alone.
+    """
+    rng = np.random.default_rng(3)
+    values = (noisy(1000.0, 200, rng) + [0.0] * 42
+              + noisy(3000.0, 56, rng) + noisy(1000.0, 150, rng))
+    series = s(values)
+    off = [(r.start, r.end) for r in find_off_runs(series) if r.notable]
+    assert off, "fixture must produce a notable off-run"
+
+    episodes = find_step_episodes(series, exclude=off)
+    bounded = [e for e in episodes if not e.open_ended]
+    assert bounded, "the step following the holdout was lost to pairing"
+    e = bounded[0]
+    # True window is 2024-08-30..2024-10-24; boundaries land within a day.
+    assert abs((e.start - pd.Timestamp("2024-08-30")).days) <= 1
+    assert abs((e.end - pd.Timestamp("2024-10-24")).days) <= 1
+
+
+def test_the_drop_into_an_off_window_is_excluded_but_the_rise_out_is_kept():
+    """Pins WHICH edge is excluded. Dropping both loses the step entirely (the
+    rise out of an off-window is also the opening shift of whatever follows);
+    dropping neither lets the drop claim the rise."""
+    rng = np.random.default_rng(3)
+    values = (noisy(1000.0, 200, rng) + [0.0] * 42
+              + noisy(3000.0, 56, rng) + noisy(1000.0, 150, rng))
+    series = s(values)
+    off = [(r.start, r.end) for r in find_off_runs(series) if r.notable]
+    kept = find_level_shifts(series)
+    lo, hi = off[0]
+    assert any(sh.at >= hi for sh in kept), "the rise out must survive"
+    episodes = find_step_episodes(series, exclude=off)
+    assert not any(e.start <= lo for e in episodes), (
+        "no episode may open at or before the drop into the off-window")
