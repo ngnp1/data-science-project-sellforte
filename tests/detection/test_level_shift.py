@@ -145,3 +145,68 @@ def test_a_series_that_never_ran_produces_nothing():
 
 def test_a_short_series_does_not_crash():
     assert find_step_episodes(s([100.0] * 5)) == []
+
+
+def test_a_step_out_of_zero_reports_no_ratio_rather_than_infinity():
+    """The back_to_back shape: a holdout occupying the window before a step, so
+    the pre-shift median is exactly 0. Dividing by it once produced inf, which
+    serialises as `Infinity` (not valid JSON) and is not a magnitude an analyst
+    can read. None is the honest answer; the fact is kept in evidence upstream.
+    """
+    rng = np.random.default_rng(12)
+    values = (noisy(100.0, 60, rng) + [0.0] * 42
+              + noisy(300.0, 120, rng))
+    for sh in find_level_shifts(s(values)):
+        assert sh.ratio is None or np.isfinite(sh.ratio), f"non-finite: {sh.ratio}"
+    for ep in find_step_episodes(s(values)):
+        assert ep.ratio is None or np.isfinite(ep.ratio)
+
+
+def test_a_zero_baseline_yields_none_not_inf_directly():
+    """Pins the branch itself: 21 zero days then a jump. Sized with literals."""
+    rng = np.random.default_rng(13)
+    values = [0.0] * 60 + noisy(500.0, 200, rng)
+    shifts = find_level_shifts(s(values))
+    assert shifts, "expected a shift out of the zero baseline"
+    assert any(sh.ratio is None for sh in shifts)
+    assert not any(sh.ratio == float("inf") for sh in shifts)
+
+
+def test_a_far_larger_opposite_shift_does_not_close_an_episode():
+    """EPISODE_MATCH_BAND decides where every bounded step_change ENDS, and
+    nothing pinned it: widening it to 1e9 changed no test in the suite.
+
+    A modest rise (100 -> 160) followed later by a far larger fall (160 -> 20)
+    is not that rise reverting; the two deltas differ by more than the band, so
+    neither shift may close the other. Both episodes stay open-ended. Widen the
+    band and they pair into one bounded episode, which is the regression this
+    catches."""
+    rng = np.random.default_rng(21)
+    values = (noisy(100.0, 120, rng) + noisy(160.0, 60, rng)
+              + noisy(20.0, 120, rng))
+    episodes = find_step_episodes(s(values))
+    assert episodes, "expected both shifts to be detected"
+    assert all(e.open_ended for e in episodes), (
+        "a far larger opposite shift must not be treated as the reversal")
+
+
+def test_a_level_that_barely_holds_is_rejected_by_persist_fraction():
+    """PERSIST_FRACTION is the "how much must still hold" half of persistence,
+    and nothing behavioural pinned it: setting it to 0 was only ever caught by
+    the hardcoded-threshold guard, an artifact of the literal appearing in other
+    modules, not coverage. My first attempt at this test was itself decorative
+    -- the mutant survived it -- which is the same trap it exists to close.
+
+    The shape: 100 for 80 days, a sharp jump to 400 held 20 days, then a settle
+    to 115 -- barely above where it started. The onset clears the z gate and
+    clears sharpness (the jump is abrupt), and PERSIST days later the level has
+    given back almost all of the move while still sitting a little ABOVE the
+    old one, so the sign check cannot reject it either. Only the magnitude half
+    of persistence can. Disable it and a shift appears at the onset.
+    """
+    rng = np.random.default_rng(41)
+    values = noisy(100.0, 80, rng) + noisy(400.0, 20, rng) + noisy(115.0, 160, rng)
+    onset_shifts = [sh for sh in find_level_shifts(s(values))
+                    if 70 <= sh.index <= 90]
+    assert onset_shifts == [], (
+        "a level that gives back almost all of its move has not held")

@@ -43,7 +43,7 @@ class LevelShift:
     index: int
     z: float
     delta: float
-    ratio: float
+    ratio: float | None      # None when the level before the shift was zero
     sharpness: float
 
 
@@ -51,7 +51,7 @@ class LevelShift:
 class StepEpisode:
     start: pd.Timestamp
     end: pd.Timestamp
-    ratio: float
+    ratio: float | None      # None when the level before the shift was zero
     z: float
     open_ended: bool
 
@@ -100,7 +100,13 @@ def find_level_shifts(s: pd.Series) -> list[LevelShift]:
 
         before_raw = np.median(raw[t - params.W:t])
         after_raw = np.median(raw[t:t + params.W])
-        ratio = float(after_raw / before_raw) if before_raw > 0 else float("inf")
+        # A step OUT OF zero has no finite ratio. Reporting inf was worse than
+        # reporting nothing: it serialises as `Infinity`, which is not valid
+        # JSON, and spec section 8 wants a magnitude an analyst can read against
+        # a briefed budget change. None says "rose from nothing" honestly.
+        # Reachable on the benchmark's back_to_back shape, where a holdout
+        # occupies most of the window before the shift.
+        ratio = float(after_raw / before_raw) if before_raw > 0 else None
 
         candidates.append(LevelShift(at=s.index[t], index=t, z=float(z),
                                      delta=delta, ratio=ratio,
