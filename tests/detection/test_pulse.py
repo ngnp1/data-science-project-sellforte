@@ -1,7 +1,7 @@
 import pandas as pd
 
 from detection.primitives.pulse import find_pulse_trains
-from detection.primitives.zero_runs import find_off_runs
+from detection.primitives.zero_runs import find_off_runs, notable_runs
 
 
 def s(values, start="2024-01-01"):
@@ -69,3 +69,42 @@ def test_a_run_touching_the_series_edge_is_excluded_from_the_train():
     t = trains[0]
     assert t.n_pulses == 2
     assert all(a != s(values).index[0] for a, _ in t.components)
+
+
+def test_a_regular_train_of_six_or_more_windows_is_currently_suppressed():
+    """KNOWN LIMITATION, pinned so it cannot change unnoticed.
+
+    P1's intermittent guard and P3's pulse detector are in direct conflict, with
+    a hard cliff at exactly six windows. A run becomes notable only if it also
+    clears RUN_RATIO x p90 of the series' OTHER off-runs, and that rule switches
+    on once five other runs exist. In a regular train every other run is the
+    same length as this one, so p90 equals this run's own length and the floor
+    becomes RUN_RATIO times it. Nothing in a regular train ever clears that:
+    five windows work, six produce zero notable runs and no train at all.
+
+    The more regular and the more numerous the flighting pattern, the more
+    certainly it is discarded -- while spec section 7 calls pulse trains the
+    only place adstock decay is observable and gives them the highest
+    informativeness weight.
+
+    The implementation is faithful to spec section 7 P1 as written; the conflict
+    is in the spec. It cannot fire on this benchmark, whose pulse family draws
+    2-4 windows, which is exactly why it is written down here: on real flighting
+    data it is the normal case, and no benchmark score can reveal it.
+    """
+    n_on, n_off = 20, 10
+    for n_pulses in (5, 6):
+        values = []
+        for _ in range(n_pulses):
+            values += [100.0] * n_on + [0.0] * n_off
+        values += [100.0] * n_on
+        series = s(values)
+        runs = notable_runs(series)
+        if n_pulses == 5:
+            assert len(runs) == 5, "a five-window train must still register"
+            assert find_pulse_trains(find_off_runs(series)), "expected a train"
+        else:
+            assert runs == [], (
+                "six regular windows: the ratio rule suppresses every run. "
+                "If this now passes, the spec conflict has been resolved and "
+                "this test should be replaced with the real expectation.")
