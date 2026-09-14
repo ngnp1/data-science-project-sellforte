@@ -35,6 +35,10 @@ def test_every_documented_parameter_exists_with_the_spec_value():
     assert params.ADSTOCK_WINDOWS_FOR_FULL_CREDIT == 4.0
     assert params.CENSORING_PENALTY == 0.7
     assert params.CONFOUNDED_PENALTY == 0.6
+    assert params.SALES_BASELINE_WEEKS == 8
+    assert params.SALES_SIGMA_FLOOR_FRAC == 0.02
+    assert params.SALES_SNR_SATURATION == 3.0
+    assert params.SALES_SNR_UNKNOWN == 0.5
 
 
 def test_confidence_and_informativeness_weight_tables_have_the_spec_values():
@@ -69,7 +73,7 @@ def test_confidence_and_informativeness_weight_tables_have_the_spec_values():
         "peers": 1.0, "sibling_channels": 0.7, "none": 0.3}
     assert params.INFORMATIVENESS_WEIGHTS == {
         "duration_adequacy": 0.25, "contrast": 0.15, "cleanliness": 0.15,
-        "control_availability": 0.2, "type_prior": 0.25}
+        "control_availability": 0.2, "sales_snr": 0.15, "type_prior": 0.1}
 
 
 def test_confidence_weight_rows_name_exactly_the_six_sub_scores():
@@ -80,6 +84,17 @@ def test_confidence_weight_rows_name_exactly_the_six_sub_scores():
     for event_type, weights in params.CONFIDENCE_WEIGHTS.items():
         assert set(weights) == names, event_type
         assert sum(weights.values()) == pytest.approx(1.0), event_type
+
+
+def test_informativeness_weights_name_exactly_the_six_drivers_and_sum_to_one():
+    """Spec section 8's sixth informativeness driver, sales_snr, was added in
+    fix round 1 -- this pins the row's full key set (so a driver silently
+    dropped from the row is caught here, not just wherever it happens to be
+    read) and re-confirms the row still sums to 1 after the rebalance."""
+    names = {"duration_adequacy", "contrast", "cleanliness",
+             "control_availability", "sales_snr", "type_prior"}
+    assert set(params.INFORMATIVENESS_WEIGHTS) == names
+    assert sum(params.INFORMATIVENESS_WEIGHTS.values()) == pytest.approx(1.0)
 
 
 def test_window_parameters_are_whole_weeks():

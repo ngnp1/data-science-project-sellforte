@@ -177,12 +177,20 @@ CONTROL_SCORE = {"peers": 1.0, "sibling_channels": 0.7, "none": 0.3}
 
 # Informativeness driver weights. One row, not per type -- the type's own
 # influence enters through TYPE_PRIOR.
+#
+# sales_snr's weight was taken from type_prior (0.25 -> 0.1), not split evenly
+# across the other four. type_prior is the softest evidence of the six: a
+# six-bucket categorical guess about the event's kind, not a per-window
+# measurement. sales_snr, like contrast and cleanliness, is measured fresh from
+# this specific window and this specific market, so it is weighted level with
+# them rather than let the coarser prior keep the larger share.
 INFORMATIVENESS_WEIGHTS = {
     "duration_adequacy": 0.25,
     "contrast": 0.15,
     "cleanliness": 0.15,
     "control_availability": 0.2,
-    "type_prior": 0.25,
+    "sales_snr": 0.15,
+    "type_prior": 0.1,
 }
 
 # Assumed adstock half-life in days. A window shorter than a few half-lives
@@ -199,3 +207,43 @@ CENSORING_PENALTY = 0.7
 
 # Multiplier applied when another event overlaps the window and confounds it.
 CONFOUNDED_PENALTY = 0.6
+
+# Sales signal-to-noise, spec section 8's sixth informativeness driver. It is a
+# noise measurement, not a causal claim: it asks whether ANY response would be
+# readable against how much this market's own turnover already swings, never
+# whether the spend change caused a sales change. Claiming the latter on a
+# benchmark where sales are generated from spend would score the detector
+# against its own answer key -- the validity gate declines that trigger for
+# exactly this reason. Readability is a different, non-circular question.
+
+# Trailing baseline length, in weeks, sales is compared against. 8 matches the
+# trailing-median window spec section 8's own worked explanation assumes ("...
+# against its trailing 8-week median ..."), rather than inventing a fresh
+# number. An event without this many days of history before it (near a
+# series' start) cannot be scored on this driver and falls back to
+# SALES_SNR_UNKNOWN. Shorter reacts faster but estimates the baseline on less
+# data; longer smooths noise better but strands more early events as unscored.
+SALES_BASELINE_WEEKS = 8
+
+# Floor on the trailing period's robust sigma, as a FRACTION of the trailing
+# median rather than an absolute euro amount -- this panel spans a 15x
+# market-size range, so an absolute floor would be too loose for a small
+# market and too tight for a large one. Too high suppresses real signal in a
+# genuinely quiet market, capping it below full credit; too low lets a
+# near-constant trailing baseline blow the ratio up from float noise alone.
+SALES_SIGMA_FLOOR_FRAC = 0.02
+
+# The trailing-baseline z-like ratio at which sales_snr saturates. Chosen to
+# match the conventional "a three-sigma move is a clear signal" cut. Too low
+# makes ordinary noise read as maximally readable and the driver stops
+# discriminating; too high means almost nothing short of an extreme swing ever
+# earns full credit.
+SALES_SNR_SATURATION = 3.0
+
+# Neutral default when sales cannot support a noise estimate at all -- the
+# frame is absent, the market has no sales column, the trailing baseline is
+# shorter than SALES_BASELINE_WEEKS, or the trailing period is flat at zero.
+# Sits at the true middle, unlike CORROBORATION_UNKNOWN's deliberate lean
+# toward the common late-feed case: there is no equivalent common case to lean
+# toward here, so missing sales data must not bias ranking up or down.
+SALES_SNR_UNKNOWN = 0.5
