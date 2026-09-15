@@ -23,7 +23,7 @@ import pandas as pd
 
 from detection.io.panel import Panel
 from detection.model import DetectedEvent
-from detection.primitives.zero_runs import find_off_runs
+from detection.primitives.zero_runs import OffRun, find_off_runs, off_mask
 from detection.score import subject_channels
 
 _TYPE_PHRASE = {
@@ -114,6 +114,33 @@ def _window_market_level(panel: Panel, country: str | None, start, end) -> float
     return float(window.mean()) if not window.empty else float("nan")
 
 
+def _best_covering_run(panel: Panel, country: str | None, channel: str | None,
+                       start, end) -> OffRun | None:
+    """The off-run on `channel`'s series with the largest overlap with
+    [start, end], or None when the channel/country is missing or the series
+    has no off-run at all. Shared by `_rank_off_run` (the distinctiveness
+    sentence) and `explain()`'s "stopped" vs "cut to a trickle" wording,
+    which both need the SAME run, not two independently-selected ones that
+    could silently disagree.
+    """
+    if not channel or not country:
+        return None
+    key = (country, channel)
+    if key not in panel.spend.columns:
+        return None
+    series = panel.spend[key]
+    present = panel.present_mask(country, channel)
+    runs = find_off_runs(series, present)
+    if not runs:
+        return None
+    best, best_overlap = None, 0
+    for run in runs:
+        overlap = (min(run.end, end) - max(run.start, start)).days + 1
+        if overlap > best_overlap:
+            best, best_overlap = run, overlap
+    return best
+
+
 def _rank_off_run(panel: Panel, country: str | None, channel: str | None,
                   start, end) -> str | None:
     """"This is the longest off-run in this series by a factor of Q, the
@@ -137,11 +164,7 @@ def _rank_off_run(panel: Panel, country: str | None, channel: str | None,
     if not runs:
         return None
 
-    best, best_overlap = None, 0
-    for run in runs:
-        overlap = (min(run.end, end) - max(run.start, start)).days + 1
-        if overlap > best_overlap:
-            best, best_overlap = run, overlap
+    best = _best_covering_run(panel, country, channel, start, end)
     if best is None:
         return None
 
@@ -211,7 +234,8 @@ def _control_sentence(event: DetectedEvent, subjects: list[str]) -> str | None:
     return None
 
 
-def _base_sentence(event: DetectedEvent, where: str) -> str:
+def _base_sentence(event: DetectedEvent, where: str,
+                   off_kind: str | None = None) -> str:
     """The opening claim. Phrased per type because `event.channel` means a
     different thing for each one: for a dark_period it is always None (the
     claim is about every channel, so naming "every channel" twice -- once as
@@ -221,6 +245,18 @@ def _base_sentence(event: DetectedEvent, where: str) -> str:
     one that stopped, exactly the inversion this module's tests exist to
     catch. Every other type's `channel` already names the channel the claim
     is actually about, so the generic form applies unchanged.
+
+    `off_kind` is the OffRun.kind ("exact_zero" | "near_zero" | "missing")
+    of the run the claim is actually about, for the two event types
+    (natural_holdout, single_channel) whose default phrasing says "stopped".
+    A near-zero run -- spend cut to a small fraction of normal, not to
+    nothing -- is NOT a stop: saying "stopped" and then, one sentence later,
+    naming a nonzero window level contradicts itself in the reader's face.
+    Only "near_zero" changes the wording; "missing" (a data gap, not a
+    confirmed pause) keeps the default phrasing and relies on the separate
+    Caveat sentence (validity.py's suspect_data_gap) to flag the gap instead
+    -- collapsing "missing" into this near-zero check would trade one
+    unchecked claim for a different one.
     """
     span = (f"for {event.n_days} consecutive days "
            f"({event.start.date()} to {event.end.date()})")
@@ -228,18 +264,74 @@ def _base_sentence(event: DetectedEvent, where: str) -> str:
         return f"{where}: every channel stopped together {span}."
     if event.event_type == "single_channel":
         survivor = event.channel or "one channel"
-        return (f"{where}: every channel except {survivor} stopped {span}.")
+        verb = "were cut to a trickle" if off_kind == "near_zero" else "stopped"
+        return f"{where}: every channel except {survivor} {verb} {span}."
     what = event.channel or "every channel"
-    phrase = _TYPE_PHRASE.get(event.event_type, event.event_type)
+    if event.event_type == "natural_holdout" and off_kind == "near_zero":
+        phrase = "one channel was cut to a trickle while the rest kept running"
+    else:
+        phrase = _TYPE_PHRASE.get(event.event_type, event.event_type)
     return f"{what} in {where}: {phrase} {span}."
+
+
+def _isolation_sentence(panel: Panel, event: DetectedEvent,
+                        subjects: list[str], where: str) -> str | None:
+    """Spec section 8's "All five other AT channels ran at normal levels
+    throughout" -- a claim about the market's OTHER channels, distinct from
+    cross-market control availability, and directly checkable against
+    off_mask the same way validity.py and score.py already read it.
+
+    Only for natural_holdout and channel_pulse: both name exactly one
+    subject channel and make no claim at all about the rest of the market
+    except that they are unaffected, so "N other channels ran normally" adds
+    real information. dark_period has no single subject channel to contrast
+    against (already excluded, per the accepted round-1 finding).
+    single_channel's claim is the opposite one -- every OTHER channel
+    stopped, which its own base sentence already states -- so a "ran
+    normally" sentence would contradict it rather than support it.
+    staggered_launch and step_change make no claim about neighbouring
+    channels at all (see detection/score.py's own note on step_change).
+    """
+    if event.event_type not in {"natural_holdout", "channel_pulse"}:
+        return None
+    country = event.country_code
+    if not country:
+        return None
+    others = [ch for ch in panel.channels_in(country) if ch not in subjects]
+    if not others:
+        return None
+    normal = 0
+    for ch in others:
+        off = off_mask(panel.series(country, ch), panel.present_mask(country, ch))
+        if not bool(off.loc[event.start:event.end].any()):
+            normal += 1
+    noun = "channel" if len(others) == 1 else "channels"
+    if normal == len(others):
+        return (f"All {len(others)} other {noun} in {where} ran at normal "
+                f"levels throughout.")
+    return (f"{normal} of {len(others)} other {noun} in {where} ran at "
+           f"normal levels throughout the window.")
 
 
 def explain(event: DetectedEvent, panel: Panel) -> str:
     where = event.country_code or "the panel"
-    parts = [_base_sentence(event, where)]
 
     subjects = subject_channels(event, panel)
     primary = subjects[0] if len(subjects) == 1 else None
+
+    # The base sentence's "stopped" wording is only correct for a genuine
+    # exact zero; a near-zero run needs different wording (see
+    # _base_sentence's docstring), so the run has to be looked up before the
+    # base sentence is built, not after.
+    off_kind = None
+    if primary is not None and event.event_type in {"natural_holdout",
+                                                     "single_channel"}:
+        covering = _best_covering_run(panel, event.country_code, primary,
+                                      event.start, event.end)
+        if covering is not None:
+            off_kind = covering.kind
+
+    parts = [_base_sentence(event, where, off_kind)]
 
     typical = _typical_level(panel, event.country_code, primary,
                              event.start, event.end)
@@ -254,21 +346,29 @@ def explain(event: DetectedEvent, panel: Panel) -> str:
             # natural_holdout, channel_pulse, staggered_launch's dormancy
             # window) always lands in the window <= 0 case, so it always
             # reads "fell ... to exactly 0" without needing a type check.
+            #
+            # The nonzero cases say "averaged" rather than hedging with
+            # "about": the number is an exact, recomputable mean of the
+            # window, not an estimate, and the brief's own register --
+            # spec section 8's "to exactly EUR0" -- states both endpoints
+            # flatly. "Averaged" is precise about what kind of number this
+            # is (a window mean, not a single day's spend) without
+            # understating how sure the detector is of it.
             if window <= 0:
                 verb, level_word = "fell", "exactly 0"
             elif window > typical:
-                verb, level_word = "rose", f"about {window:,.0f}"
+                verb, level_word = "rose", f"averaged {window:,.0f}"
             elif window < typical:
-                verb, level_word = "fell", f"about {window:,.0f}"
+                verb, level_word = "fell", f"averaged {window:,.0f}"
             else:
-                verb, level_word = "moved", f"about {window:,.0f}"
+                verb, level_word = "moved", f"averaged {window:,.0f}"
             parts.append(
                 f"{primary} {verb} from a typical {typical:,.0f} per day to "
                 f"{level_word} per day over this window.")
         else:
             parts.append(
-                f"Normal spend on {primary} is about {typical:,.0f} per day "
-                f"outside the window.")
+                f"Normal spend on {primary} is typically {typical:,.0f} per "
+                f"day outside the window.")
     elif event.channel is None:
         # A country-level event (dark_period) has no single channel for the
         # block above to read -- event.channel is always None for one -- so
@@ -286,11 +386,11 @@ def explain(event: DetectedEvent, panel: Panel) -> str:
             if market_window <= 0:
                 verb, level_word = "fell", "exactly 0"
             elif market_window > market_typical:
-                verb, level_word = "rose", f"about {market_window:,.0f}"
+                verb, level_word = "rose", f"averaged {market_window:,.0f}"
             elif market_window < market_typical:
-                verb, level_word = "fell", f"about {market_window:,.0f}"
+                verb, level_word = "fell", f"averaged {market_window:,.0f}"
             else:
-                verb, level_word = "moved", f"about {market_window:,.0f}"
+                verb, level_word = "moved", f"averaged {market_window:,.0f}"
             n_channels = (len(panel.channels_in(event.country_code))
                          if event.country_code else len(subjects))
             parts.append(
@@ -324,6 +424,10 @@ def explain(event: DetectedEvent, panel: Panel) -> str:
                              event.start, event.end)
         if rank:
             parts.append(rank)
+
+    isolation = _isolation_sentence(panel, event, subjects, where)
+    if isolation:
+        parts.append(isolation)
 
     if event.event_type == "staggered_launch":
         onset = event.evidence.get("onset")

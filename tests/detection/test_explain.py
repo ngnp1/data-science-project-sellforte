@@ -7,6 +7,10 @@ from tests.detection.test_score import build, event
 
 
 def test_the_explanation_names_the_channel_market_dates_and_length():
+    """`assert "30" in text` alone is satisfied by the end date's own
+    "2024-03-30" -- deleting the entire "for N consecutive days" clause
+    still leaves a bare "30" in the text via the date, so that assertion
+    passes for the wrong reason. Assert the actual clause instead."""
     p = build({"TV": [100.0] * 60 + [0.0] * 30 + [100.0] * 60,
                "Radio": [50.0] * 150})
     e = event(p, "TV", 60, 89, detection_confidence=0.9,
@@ -16,7 +20,7 @@ def test_the_explanation_names_the_channel_market_dates_and_length():
     assert "DE" in text
     assert str(p.dates[60].date()) in text
     assert str(p.dates[89].date()) in text
-    assert "30" in text
+    assert "for 30 consecutive days" in text
 
 
 def test_the_explanation_states_the_normal_level_and_the_window_level():
@@ -199,3 +203,44 @@ def test_deleting_the_dark_period_market_total_sentence_fails_the_test_above():
     e = event(p, "TV", 60, 89, event_type="natural_holdout")
     text = explain(e, p)
     assert "typical 180 per day to exactly 0 per day" not in text
+
+
+def test_a_near_zero_run_says_cut_to_a_trickle_not_stopped():
+    """Fix round 2, Important 1: a near-zero off-run (spend cut to a small
+    fraction of normal, not to nothing) must not be called "stopped" --
+    saying "stopped" and then naming a nonzero window level one sentence
+    later contradicts itself. 80/day against a typical 1,000/day is 8% of
+    normal and clears off_mask's threshold (RHO * active_level = 150), so
+    OffRun.kind is "near_zero", not "exact_zero"."""
+    p = build({"TV": [1000.0] * 60 + [80.0] * 30 + [1000.0] * 60,
+               "Radio": [50.0] * 150})
+    e = event(p, "TV", 60, 89, event_type="natural_holdout",
+              detection_confidence=0.9, informativeness=0.5)
+    text = explain(e, p)
+    assert "cut to a trickle" in text
+    assert "stopped" not in text
+
+
+def test_an_exact_zero_run_still_says_stopped():
+    """The near-zero wording must not leak onto a genuine exact zero -- the
+    original register ("one channel stopped while the rest kept running")
+    is still correct there and must not be replaced wholesale."""
+    p = build({"TV": [100.0] * 60 + [0.0] * 30 + [100.0] * 60,
+               "Radio": [50.0] * 150})
+    e = event(p, "TV", 60, 89, event_type="natural_holdout")
+    text = explain(e, p)
+    assert "one channel stopped while the rest kept running" in text
+    assert "cut to a trickle" not in text
+
+
+def test_a_natural_holdout_names_the_other_channels_that_ran_normally():
+    """Fix round 2, small addition: spec section 8's "All five other AT
+    channels ran at normal levels throughout" -- a claim about the market's
+    OTHER channels, distinct from cross-market control availability. Radio
+    and Podcast both run at a steady nonzero level throughout the TV
+    holdout window, so both count as normal."""
+    p = build({"TV": [100.0] * 60 + [0.0] * 30 + [100.0] * 60,
+               "Radio": [50.0] * 150, "Podcast": [30.0] * 150})
+    e = event(p, "TV", 60, 89, event_type="natural_holdout")
+    text = explain(e, p)
+    assert "All 2 other channels in DE ran at normal levels throughout." in text
