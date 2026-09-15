@@ -1,9 +1,14 @@
+import pathlib
+
 import numpy as np
 import pandas as pd
 
 from detection import params
+from detection.io.panel import build_panel
 from detection.primitives.level_shift import find_level_shifts, find_step_episodes
 from detection.primitives.zero_runs import find_off_runs
+
+DEV = pathlib.Path(__file__).resolve().parents[2] / "benchmark" / "datasets" / "dev"
 
 
 def s(values, start="2024-01-01"):
@@ -39,14 +44,16 @@ def test_a_flat_noisy_series_produces_no_step():
 
 
 def test_the_benchmark_shaped_ramp_produces_no_step():
-    """The benchmark injects a 50-day ramp rising 1.2x to 2.0x in blocks and
-    records NO step change; a detector that fires here is wrong.
+    """A SYNTHETIC stand-in for the benchmark's ramp: a 50-day rise in blocks,
+    flat noise, no seasonality. A detector that fires here is wrong.
 
-    This shape never reaches the sharpness gate: a rise spread over 50 days
-    inflates the within-window MAD enough that no candidate clears Z_THRESH at
-    all (max |z| 3.25, measured). Sharpness is what rejects the ~7-20 day ramps
-    -- see test_a_gradual_ramp_is_rejected_by_sharpness, which is the test that
-    fails when SHARPNESS is disabled.
+    This is not the benchmark's actual ramp and does not die at the same gate --
+    see test_the_benchmarks_own_blocked_ramp_emits_no_step, which loads the real
+    series and where SHARPNESS is what holds. On this cleaner synthetic shape
+    the z gate gets there first: spreading the rise over 50 days inflates the
+    within-window MAD enough that no candidate clears Z_THRESH at all (max |z|
+    3.25, measured). Both tests are kept: the real one pins the defence that
+    matters, this one pins the smooth-and-quiet end of the family.
     """
     rng = np.random.default_rng(3)
     values = noisy(100.0, 120, rng)
@@ -415,3 +422,35 @@ def test_no_shift_is_found_on_a_battery_of_series_with_no_level_change():
             assert found == [], (
                 f"seed {seed}, {name}: no level change to find, but reported "
                 f"{[(sh.index, round(sh.z, 2)) for sh in found]}")
+
+
+def test_the_benchmarks_own_blocked_ramp_emits_no_step():
+    """THE ramp defence, on the benchmark's own gradual ramp rather than a
+    synthetic stand-in.
+
+    dev_044's FI/Radio series is a five-block drift that the benchmark records
+    as NO step change. It is not the shape the synthetic ramp fixtures above
+    model -- it carries seasonality and day-of-week structure, and it is blocked
+    rather than smooth -- and it does not die at the same gate. Measured through
+    the current gates:
+
+        candidates clearing the z gate : 5 (not zero)
+        max |z| on the series          : 4.761 at index 201
+        persistence                    : all five pass
+        best surviving sharpness       : 0.355, about 41% below SHARPNESS
+        shifts emitted                 : none
+        step episodes emitted          : none
+
+    So SHARPNESS alone rejects it. The module docstring used to name the z gate
+    as what held this shape, with a thin margin; that was measured on the
+    synthetic fixture and was never true of this series. Lower SHARPNESS far
+    enough to admit a 0.355 candidate and this test fails -- which is what makes
+    it a pin on the real defence rather than an incidental pass.
+    """
+    media = pd.read_csv(DEV / "dev_044" / "media.csv", parse_dates=["date"])
+    series = build_panel(media, None, "dev_044").series("FI", "Radio")
+
+    assert find_level_shifts(series) == [], (
+        "the benchmark's own gradual ramp must not report a level shift")
+    assert find_step_episodes(series) == [], (
+        "the benchmark's own gradual ramp must not report a step episode")

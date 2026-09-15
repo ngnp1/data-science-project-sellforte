@@ -18,23 +18,33 @@ The z's scale is measured on each comparison window separately and never
 across the pair -- see _noise_sigma, which is where the closing shift of a
 bounded step change used to be lost.
 
-Measured on a ramp-length sweep (a 100 -> 300 rise spread over L days, eight
-seeds each), the two gates divide the work by steepness: a rise landing inside
-about five days reads as a step, and a rise spread over seven days or more
-reads as a ramp and yields nothing. Ramps of ~7-20 days clear both z and
-persistence and are rejected by sharpness alone (measuring at most 0.43 against
-the SHARPNESS threshold), while the benchmark's own 50-day blocked ramp never
-reaches sharpness at all -- spreading the rise over 50 days inflates the
-within-window MAD until no candidate clears Z_THRESH (max |z| 3.25). Both
-shapes correctly yield no step.
+WHICH gate rejects a gradual ramp was measured rather than assumed, and the
+answer differs between the benchmark's own ramp and a synthetic one. The
+distinction matters: they are not the same shape and they do not die at the
+same gate.
 
-Known sensitivity: that ramp/step boundary sits at roughly five days and the
-50-day blocked ramp clears the z gate by a thin margin (3.25 against
-Z_THRESH), so a slower phase-in on a quieter series is the shape most likely
-to read as a step when it should not. A phase-in of up to four days now reads
-as a step, which is the intended direction -- a budget decision executed over
-a long weekend is a step -- but it is also where the next false positive would
-come from; see the Plan 4 handover.
+- The BENCHMARK's gradual ramp -- a five-block drift, on a real series carrying
+  seasonality and day-of-week structure -- CLEARS the z gate (five candidates
+  clear it; max |z| on the series is 4.761) and CLEARS persistence (all five).
+  SHARPNESS alone rejects it: the best surviving candidate lands 0.355 of its
+  change inside SHARPNESS_WINDOW days, roughly 41% below the threshold. No
+  shift and no episode is emitted. Sharpness is the load-bearing gate for this
+  shape; lowering it removes the only defence that is holding. Pinned by
+  test_the_benchmarks_own_blocked_ramp_emits_no_step.
+- A SYNTHETIC flat rise of the same total size, spread evenly over L days with
+  no seasonality and no blocking, behaves differently. Over an eight-seed
+  sweep: L of four days or fewer reads as a step, L of seven or more never
+  does, and the crossover sits near five days. Those ramps are rejected by
+  sharpness as well (at most 0.43 of the change inside the window); only the
+  longest and smoothest of them is stopped earlier, by the z gate.
+
+Known sensitivity: SHARPNESS, not the z gate, is what holds a blocked gradual
+ramp, and on the benchmark's own it holds with room to spare rather than
+marginally. The residual risk is the opposite shape -- a real budget change
+phased in slowly on a quiet series reads as a ramp and is dropped, and a
+phase-in of four days or fewer now reads as a step where it once did not. Both
+are sharpness decisions and neither involves the z gate; see the Plan 4
+handover.
 """
 from __future__ import annotations
 
