@@ -119,3 +119,29 @@ def test_pooling_actually_merges_not_just_bins_a_three_bin_cascade():
     # block, not left as three separate (inverted) ones.
     distinct_values = {round(v, 6) for _, v in knots}
     assert len(distinct_values) == 1
+
+
+def test_rendered_output_is_admissible_under_the_threshold_guard():
+    """The round-trip test above proves render_module's output is
+    importable; it does not prove it is admissible where it will actually
+    live. Task 10 writes render_module's output to detection/
+    calibration_fit.py, where tests/detection/test_params.py's
+    no-hardcoded-threshold guard scans it. A realistic decile fit's bin
+    upper edges (0.1, 0.2, ..., 1.0) collide on pure decimal coincidence with
+    several of params.py's float values (e.g. "0.2" and "0.5" are always
+    present as edges regardless of the data), so this must be checked
+    against the guard's OWN needle-derivation and scan logic, not just
+    against render_module's contract in isolation."""
+    from tests.detection.test_params import (
+        _threshold_guard_needles, _threshold_guard_offenders,
+    )
+
+    rng = np.random.default_rng(3)
+    scores = list(rng.random(2000))
+    correct = [bool(rng.random() < s) for s in scores]
+    knots = fit_pav(scores, correct, n_bins=10)
+    src = render_module(knots)
+
+    needles = _threshold_guard_needles()
+    offenders = _threshold_guard_offenders("calibration_fit.py", src, needles)
+    assert not offenders, offenders
