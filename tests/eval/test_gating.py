@@ -141,6 +141,11 @@ def test_repeat_final_run_banners_the_report_and_increments_run_index(
     """
     from benchmark.eval import run_final
 
+    # Capture the real final_runs.jsonl state before the test, to verify
+    # the test does not modify it (immutability check).
+    real_final_runs_path = ROOT / "benchmark/eval/final_runs.jsonl"
+    real_final_runs_state = real_final_runs_path.read_text() if real_final_runs_path.exists() else None
+
     fake_final_runs = tmp_path / "final_runs.jsonl"
     monkeypatch.setattr(run_final, "FINAL_RUNS", fake_final_runs)
 
@@ -178,8 +183,10 @@ def test_repeat_final_run_banners_the_report_and_increments_run_index(
     assert prior_count == 2
     assert "#3" in run_final._repeat_run_banner(prior_count + 1, prior_count)
 
-    # The real final_runs.jsonl must still not exist as a result of this test.
-    assert not (ROOT / "benchmark/eval/final_runs.jsonl").exists()
+    # The real final_runs.jsonl must not be modified by this test. It may exist
+    # (after a prior final run), but its contents must be unchanged. This leak
+    # check catches if a test ever silently appended to the audit record.
+    assert (real_final_runs_path.read_text() if real_final_runs_path.exists() else None) == real_final_runs_state
 
 
 def _fake_results() -> dict:
@@ -244,6 +251,11 @@ def test_a_failing_out_path_still_records_the_final_run(tmp_path, monkeypatch):
     """
     import pytest
 
+    # Capture the real final_runs.jsonl state before the test, to verify
+    # the test does not modify it (immutability check).
+    real_final_runs_path = ROOT / "benchmark/eval/final_runs.jsonl"
+    real_final_runs_state = real_final_runs_path.read_text() if real_final_runs_path.exists() else None
+
     run_final, fake_final_runs = _stub_the_gated_path(
         monkeypatch, tmp_path, _fake_results())
 
@@ -263,7 +275,10 @@ def test_a_failing_out_path_still_records_the_final_run(tmp_path, monkeypatch):
 
     # And the NEXT run therefore knows it is a repeat.
     assert run_final._prior_run_count() == 1
-    assert not (ROOT / "benchmark/eval/final_runs.jsonl").exists()
+    # The real final_runs.jsonl must not be modified by this test. It may exist
+    # (after a prior final run), but its contents must be unchanged. This leak
+    # check catches if a test ever silently appended to the audit record.
+    assert (real_final_runs_path.read_text() if real_final_runs_path.exists() else None) == real_final_runs_state
 
 
 def test_compose_report_puts_the_repeat_banner_above_the_report(
