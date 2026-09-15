@@ -2,6 +2,57 @@ import pytest
 
 from detection import params
 
+# Files under detection/ that are generated DATA, not logic, and are
+# therefore exempt from the "no hardcoded threshold" guard below -- exactly
+# like params.py itself, which the guard already excludes because it is the
+# source of the needles, not a place a needle could hide.
+#
+# detection/calibration_fit.py (Task 10) is a frozen calibration mapping
+# rendered by detection/calibrate.py's render_module(). Its bin-upper-edge
+# knots are fixed decile cuts (0.1, 0.2, ..., 1.0) that will collide with
+# several of params.py's float values on pure coincidence of decimal
+# formatting (e.g. "0.2", "0.5", "0.6", "0.7") no matter what the fit ever
+# learns. That is not a hardcoded threshold; it is fitted numbers, the same
+# category of thing params.py itself is.
+#
+# Keep this set to exactly the one file it exists for -- a broad exemption
+# would let a real hardcoded threshold hide behind it. See
+# test_the_threshold_guard_exemption_is_exactly_one_file below.
+GUARD_EXEMPT_FILENAMES = {"calibration_fit.py"}
+
+
+def _threshold_guard_needles():
+    """The exact needle-derivation logic test_no_logic_module_hardcodes_a_
+    threshold uses: every FLOAT-valued top-level attribute of params.py,
+    formatted the way it would appear in source. Shared so any other test
+    that needs to know whether text is admissible under the guard checks the
+    same needles the guard itself checks."""
+    needles = []
+    for name in dir(params):
+        if name.startswith("_"):
+            continue
+        val = getattr(params, name)
+        if isinstance(val, float):
+            needles.append(str(val))
+    return needles
+
+
+def _threshold_guard_offenders(filename: str, text: str, needles) -> list[str]:
+    """The exact skip-and-scan logic test_no_logic_module_hardcodes_a_
+    threshold applies to one file's text, given its needle list. Shared so a
+    test can check whether some rendered text WOULD be admissible if it
+    lived under detection/ as `filename`, without re-deriving the rule."""
+    if filename == "params.py" or filename in GUARD_EXEMPT_FILENAMES:
+        return []
+    return [f"{filename}: {needle}" for needle in needles if needle in text]
+
+
+def test_the_threshold_guard_exemption_is_exactly_one_file():
+    """A broad exemption would let a real hardcoded threshold hide behind
+    it -- pin the exemption list to precisely the one generated file it
+    exists for."""
+    assert GUARD_EXEMPT_FILENAMES == {"calibration_fit.py"}
+
 
 def test_every_documented_parameter_exists_with_the_spec_value():
     """Spec section 7's parameter table. These are the defaults the design was
@@ -113,26 +164,21 @@ def test_no_logic_module_hardcodes_a_threshold():
     are deliberately out of scope because their literals are indistinguishable
     from ordinary indices, ranges and slicing. A value written differently
     (e.g. .6 for 0.6, or 7/2 for 3.5) would also slip past this guard.
+
+    detection/calibration_fit.py is exempt by name (GUARD_EXEMPT_FILENAMES,
+    above) -- it is a generated data file, not logic, exactly like params.py
+    itself. See test_the_threshold_guard_exemption_is_exactly_one_file for
+    why that exemption cannot silently widen, and
+    tests/detection/test_calibrate.py's guard-survival test for proof that a
+    realistic rendered fit is actually clean under this exemption.
     """
     import pathlib
 
-    # Derive the needle list from params.py itself (float values only).
-    needles = []
-    for name in dir(params):
-        if name.startswith("_"):
-            continue
-        val = getattr(params, name)
-        if isinstance(val, float):
-            # Format the float as it would appear in source code.
-            needles.append(str(val))
+    needles = _threshold_guard_needles()
 
     root = pathlib.Path(__file__).resolve().parents[2] / "detection"
     offenders = []
     for py in root.rglob("*.py"):
-        if py.name == "params.py":
-            continue
-        text = py.read_text()
-        for needle in needles:
-            if needle in text:
-                offenders.append(f"{py.name}: {needle}")
+        offenders.extend(
+            _threshold_guard_offenders(py.name, py.read_text(), needles))
     assert not offenders, f"hardcoded thresholds: {offenders}"

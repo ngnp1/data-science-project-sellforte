@@ -70,9 +70,13 @@ def fit_pav(scores, correct, n_bins: int):
 def apply_calibration(score: float, knots) -> float:
     """Map a raw score through the fitted mapping.
 
-    With no knots the mapping is the identity: an uncalibrated detector must
-    report its raw score (clamped to [0, 1]), not zero -- absence of a fit is
-    not evidence the score is wrong.
+    With no knots the mapping is the identity ON THE VALID RANGE: an
+    uncalibrated detector must report its raw score, not zero -- absence of a
+    fit is not evidence the score is wrong. The result is still clamped to
+    [0, 1], because a confidence outside that range is meaningless and would
+    propagate a nonsense number straight into the reliability curve; for any
+    score already in [0, 1] the clamp is a no-op and the identity holds
+    exactly.
     """
     if not knots:
         return float(min(1.0, max(0.0, score)))
