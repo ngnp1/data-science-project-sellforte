@@ -51,6 +51,9 @@ class DetectedEvent:
     # are fine; the reasons tuple is empty unless something tripped.
     validity: str = "ok"
     validity_reasons: tuple[str, ...] = ()
+    # Spec section 8's output schema. Empty until the pipeline scores the
+    # event; the composition layers do not write prose.
+    explanation: str = ""
 
     @property
     def n_days(self) -> int:

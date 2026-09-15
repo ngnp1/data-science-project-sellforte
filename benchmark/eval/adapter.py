@@ -6,11 +6,11 @@ there even mentions the harness package or a truth path. So the detector emits
 its own `DetectedEvent` and the harness, which is allowed to know everything,
 adapts.
 
-Two fields are deliberately dropped on the way across. `evidence` is a free-form
-diagnostic dict with no place in the scored vocabulary, and the section 8 scores
-(`detection_confidence`, `informativeness`) are left None because nothing
-computes them yet; a placeholder would be indistinguishable from a real score
-in the reliability curve.
+`evidence` is still dropped on the way across -- it is a free-form diagnostic
+dict with no place in the scored vocabulary. The section 8 scores
+(`detection_confidence`, `informativeness`) now carry across: `detection/`
+computes them in the pipeline (Plan 4), so a placeholder is no longer needed
+and would only hide a real score from the reliability and operating curves.
 """
 from __future__ import annotations
 
@@ -30,6 +30,8 @@ def to_event(d: DetectedEvent) -> Event:
         multiplier=d.magnitude_ratio,
         components=d.components,
         tags=d.tags,
+        detection_confidence=d.detection_confidence,
+        informativeness=d.informativeness,
     )
 
 
