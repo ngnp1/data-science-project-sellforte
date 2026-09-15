@@ -5,7 +5,15 @@ later scoring layer, but it never participates in finding an event: it is
 noisier by an order of magnitude, carries seasonality and promotions, and
 coupling the two makes every failure harder to explain. That claim is asserted
 rather than asserted-about in tests/detection/test_pipeline.py, which runs the
-whole pipeline with and without the sales frame and requires identical output.
+whole pipeline with and without the sales frame and requires identical EVENT
+IDENTITIES -- which events, of what type, over what boundaries, with what
+confidence and validity. It does NOT require identical output: informativeness
+is permitted to differ, because its sales_snr driver (detection/score.py)
+reads sales on purpose, to judge how readable a market's response would be,
+not to help find the event in the first place. Scoring an already-found event
+is not the same thing as participating in finding it, and the test draws that
+line explicitly rather than asserting full-object equality, which this driver
+would fail by design.
 
 `annotate` is a strictly 1:1 pass -- it adds tags and evidence and changes
 nothing else -- and it ignores staggered launches outright, since a launch is
