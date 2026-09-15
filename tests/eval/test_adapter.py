@@ -87,3 +87,18 @@ def test_detect_is_the_callable_run_dev_loads():
     Checks the loader, not the string."""
     from benchmark.eval.run_dev import load_detector
     assert load_detector("benchmark.eval.adapter:detect") is detect
+
+
+def test_the_adapter_carries_both_scores_across():
+    """The harness's reliability and operating curves read
+    Event.detection_confidence. Dropping it here renders both degenerate --
+    which is exactly what happened before scoring existed."""
+    from detection.model import DetectedEvent
+    d = DetectedEvent(
+        sid="dev_001", country_code="DE", channel="TV",
+        event_type="natural_holdout",
+        start=pd.Timestamp("2024-03-01"), end=pd.Timestamp("2024-04-01"),
+        detection_confidence=0.83, informativeness=0.41)
+    e = to_event(d)
+    assert e.detection_confidence == 0.83
+    assert e.informativeness == 0.41

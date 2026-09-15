@@ -20,12 +20,23 @@ one layer down, in compose.cross_market.
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pandas as pd
 
+from detection.calibrate import apply_calibration
 from detection.compose.cross_market import annotate, find_staggered_launches
 from detection.compose.label import label_market
+from detection.explain import explain
 from detection.io.panel import build_panel
 from detection.model import DetectedEvent
+from detection.score import confidence, informativeness
+from detection.validity import assess
+
+try:                                  # pragma: no cover - the frozen fit is
+    from detection.calibration_fit import KNOTS   # generated in Task 10
+except ImportError:                   # pragma: no cover
+    KNOTS = []
 
 
 def run_detection(media_df: pd.DataFrame, sales_df: pd.DataFrame | None = None,
@@ -45,6 +56,26 @@ def run_detection(media_df: pd.DataFrame, sales_df: pd.DataFrame | None = None,
 
     events = annotate(events, panel)
     events.extend(find_staggered_launches(panel, sid))
+
+    scored = []
+    for e in events:
+        raw, parts = confidence(e, panel)
+        info, drivers = informativeness(e, panel)
+        verdict, reasons = assess(e, panel)
+        evidence = dict(e.evidence)
+        evidence.update(confidence_sub_scores=parts,
+                        informativeness_drivers=drivers,
+                        raw_confidence=raw)
+        e = replace(
+            e,
+            detection_confidence=apply_calibration(raw, KNOTS),
+            informativeness=info,
+            validity=verdict,
+            validity_reasons=reasons,
+            evidence=evidence,
+        )
+        scored.append(replace(e, explanation=explain(e, panel)))
+    events = scored
 
     events.sort(key=lambda e: (str(e.country_code), e.start, str(e.channel),
                                e.event_type))

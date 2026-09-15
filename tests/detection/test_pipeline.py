@@ -69,16 +69,33 @@ def test_every_interval_is_inclusive_and_ordered():
 def test_sales_do_not_participate_in_detection():
     """The module docstring claims detection runs on SPEND ONLY. That is a
     causal claim about this pipeline, so it is asserted rather than repeated:
-    dropping the sales frame entirely must not change a single event.
+    dropping the sales frame entirely must not change which events are found,
+    their boundaries, or their validity/confidence.
 
     The brief's version of this test asserted only `is not None`, which a
     detector that silently returned [] without sales would also satisfy.
+
+    Full-object equality is deliberately NOT used here (Plan 4 onward): the
+    informativeness score's sales_snr driver (detection/score.py) is by
+    design the one place sales legitimately participates, in SCORING an
+    already-found event, not in finding it. Comparing on identity plus
+    validity plus detection_confidence -- none of which read sales, per
+    detection/score.py and detection/validity.py -- keeps this test pinned
+    to the actual invariant instead of a coincidence that stopped holding the
+    moment scoring existed.
     """
     media, sales = load("dev_005")
     with_sales = run_detection(media, sales, "dev_005")
     without_sales = run_detection(media, None, "dev_005")
     assert with_sales, "nothing detected at all; the comparison proves nothing"
-    assert with_sales == without_sales
+
+    def identity(e):
+        return (e.sid, e.country_code, e.channel, e.event_type, e.start,
+                e.end, e.magnitude_ratio, e.components, e.tags,
+                e.detection_confidence, e.validity, e.validity_reasons)
+
+    assert [identity(e) for e in with_sales] == \
+           [identity(e) for e in without_sales]
 
 
 def test_the_sales_frame_reaches_the_panel():
@@ -275,3 +292,48 @@ def test_an_empty_media_frame_returns_no_events_rather_than_raising():
     end can be NaT"."""
     empty = pd.DataFrame(columns=_MEDIA_COLS)
     assert run_detection(empty, None, "dev_test") == []
+
+
+def test_every_detected_event_carries_all_three_scores():
+    media, sales = load("dev_005")
+    events = run_detection(media, sales, "dev_005")
+    assert events
+    for e in events:
+        assert e.detection_confidence is not None
+        assert 0.0 <= e.detection_confidence <= 1.0
+        assert e.informativeness is not None
+        assert 0.0 <= e.informativeness <= 1.0
+        assert e.validity in {"ok", "suspect_data_gap", "suspect_tracking_loss"}
+
+
+def test_every_detected_event_carries_an_explanation():
+    media, sales = load("dev_005")
+    for e in run_detection(media, sales, "dev_005"):
+        assert len(e.explanation) > 40, e.event_type
+
+
+def test_events_can_be_ranked_by_informativeness():
+    """The brief asks for ranking explicitly. If every event scores the same,
+    ranking is decorative.
+
+    dev_017, the scenario named in the task-7 brief for this test, produces
+    ZERO detections on this pipeline (its one truth event is a step_change
+    the detector misses -- an existing, unrelated recall gap, not something
+    this task touches): `len(scores) > 1` against an empty set silently
+    fails as `0 > 1` with no signal about discrimination at all, which is
+    exactly the kind of assertion-on-the-wrong-thing this plan's brief warns
+    about. dev_035 detects five events of five different types and is used
+    instead.
+
+    `len(scores) > 1` alone would also pass a detector that produced two
+    distinct values and 59 identical ones -- not a meaningful ranking. This
+    asserts every one of the five events gets its OWN score (the strongest
+    check dev_035 supports), not merely that a second value exists somewhere.
+    """
+    media, sales = load("dev_035")
+    events = run_detection(media, sales, "dev_035")
+    assert len(events) >= 4, "fixture drifted; the discrimination check needs several events"
+    scores = {round(e.informativeness, 4) for e in events}
+    assert len(scores) == len(events), (
+        "informativeness does not discriminate between all events "
+        f"({len(scores)} distinct values for {len(events)} events)")
