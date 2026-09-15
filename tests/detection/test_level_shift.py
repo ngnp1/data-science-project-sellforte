@@ -44,9 +44,9 @@ def test_the_benchmark_shaped_ramp_produces_no_step():
 
     This shape never reaches the sharpness gate: a rise spread over 50 days
     inflates the within-window MAD enough that no candidate clears Z_THRESH at
-    all. Sharpness is what rejects the 3-30 day ramps -- see
-    test_a_gradual_ramp_is_rejected_by_sharpness, which is the test that fails
-    when SHARPNESS is disabled.
+    all (max |z| 3.25, measured). Sharpness is what rejects the ~7-20 day ramps
+    -- see test_a_gradual_ramp_is_rejected_by_sharpness, which is the test that
+    fails when SHARPNESS is disabled.
     """
     rng = np.random.default_rng(3)
     values = noisy(100.0, 120, rng)
@@ -59,12 +59,13 @@ def test_the_benchmark_shaped_ramp_produces_no_step():
 def test_a_gradual_ramp_is_rejected_by_sharpness():
     """THE ramp defence, on a ramp that actually reaches it.
 
-    A 10-day 100->300 ramp clears the z gate (|z| ~ 9) AND the persistence gate
-    -- a ramp's new level genuinely does hold, which is why persistence alone
-    cannot reject it. Sharpness is the only filter left: the ramp lands ~0.23 of
-    its change within SHARPNESS_WINDOW days, against a 0.6 threshold. Set
-    params.SHARPNESS to 0 and this test fails; that is what makes the filter
-    load-bearing rather than decorative.
+    A 10-day 100->300 ramp clears the z gate (max |z| ~ 9.5) AND the persistence
+    gate -- a ramp's new level genuinely does hold, which is why persistence
+    alone cannot reject it. Sharpness is the only filter left: no candidate that
+    clears z and persistence lands more than 0.43 of its change within
+    SHARPNESS_WINDOW days, against a 0.6 threshold. Delete the sharpness block
+    and this test fails; that is what makes the filter load-bearing rather than
+    decorative.
     """
     rng = np.random.default_rng(9)
     values = noisy(100.0, 150, rng)
@@ -88,16 +89,20 @@ def test_a_one_day_spike_produces_no_step():
 def test_a_decaying_excursion_is_rejected_by_persistence():
     """THE persistence defence, on the only shape that actually reaches it.
 
-    A level that jumps and then DECAYS back is not a new level. The opening
-    shift clears the z gate, and it clears sharpness too -- the jump itself is
-    abrupt -- so persistence is the only filter that can reject it: PERSIST days
-    later the level has not held.
+    A level that jumps and then DECAYS back is not a new level, and must yield
+    no step. It no longer reaches persistence to be rejected: measuring the z's
+    scale on each comparison window separately (Task 8) means the window AFTER
+    the jump is scored on its own spread, and a window spanning a decay from 3x
+    to 1x has an enormous spread, so |z| peaks at 0.93 and the z gate rejects
+    the onset first. Deleting the persistence block therefore no longer makes
+    this test fail -- the shape is still rejected, by an earlier gate.
 
-    Verified by deleting the persistence block outright, not by zeroing PERSIST.
-    Zeroing relocates the check instead of disabling it, which is how this gate
-    sat with zero coverage while a mutation battery reported it healthy. The
-    earlier rise-hold-revert fixture reaches this filter but is rejected by the
-    z gate whether or not persistence runs, so it never tested anything.
+    The persistence gate's own behavioural pin is
+    test_a_level_that_barely_holds_is_rejected_by_persist_fraction, which does
+    die when the block is deleted. Both were verified by deleting the block
+    outright, not by zeroing PERSIST: zeroing relocates the check instead of
+    disabling it, which is how this gate once sat with zero coverage while a
+    mutation battery reported it healthy.
 
     Sized with literals: a 25-day decay from 3x back to 1x.
     """
@@ -244,7 +249,16 @@ def test_a_step_following_a_holdout_is_not_swallowed_by_the_pairing():
 def test_the_drop_into_an_off_window_is_excluded_but_the_rise_out_is_kept():
     """Pins WHICH edge is excluded. Dropping both loses the step entirely (the
     rise out of an off-window is also the opening shift of whatever follows);
-    dropping neither lets the drop claim the rise."""
+    dropping neither lets the drop claim the rise.
+
+    The second assertion used to compare the episode start against the
+    off-run's START. A shift on that edge is never dated at the first off day
+    -- the centred rolling median puts it a day or so either side of it -- so
+    the comparison was true whatever `exclude` did, and neutering `exclude`
+    left it passing. It now names the drop shift itself and asserts that no
+    episode opens ON it, which is the mechanism: delete the exclusion filter in
+    find_step_episodes and this fails.
+    """
     rng = np.random.default_rng(3)
     values = (noisy(1000.0, 200, rng) + [0.0] * 42
               + noisy(3000.0, 56, rng) + noisy(1000.0, 150, rng))
@@ -253,9 +267,56 @@ def test_the_drop_into_an_off_window_is_excluded_but_the_rise_out_is_kept():
     kept = find_level_shifts(series)
     lo, hi = off[0]
     assert any(sh.at >= hi for sh in kept), "the rise out must survive"
+
+    drops_in = [sh for sh in kept if sh.delta < 0 and sh.at <= hi]
+    assert len(drops_in) == 1, f"fixture must show one drop in: {drops_in}"
+    drop = drops_in[0]
+
     episodes = find_step_episodes(series, exclude=off)
-    assert not any(e.start <= lo for e in episodes), (
-        "no episode may open at or before the drop into the off-window")
+    assert not any(e.start == drop.at for e in episodes), (
+        f"no episode may open on the drop into the off-window ({drop.at}); "
+        f"episodes opened at {[e.start for e in episodes]}")
+
+
+def test_a_launch_out_of_zero_does_not_pair_with_an_unrelated_later_cut():
+    """The zero-origin pairing waiver, scoped.
+
+    A shift out of zero has no measurable magnitude, so
+    test_a_step_following_a_holdout_is_not_swallowed_by_the_pairing waives the
+    EPISODE_MATCH_BAND check for it. Waived for EVERY rise out of zero, that
+    also covered an ordinary channel launch: the channel starts, and the next
+    opposite shift -- here a cut to half, ten months later and about four times
+    outside the band -- was accepted as its reversal, reporting the whole span
+    as one step change. No development scenario has this shape, so the score
+    could not reveal it.
+
+    The launch has no previous level for a later shift to revert TO, which is
+    what separates it from a pause: its off-window abuts the start of the
+    series. Both shifts must therefore stay open-ended, which is what the
+    composition layer drops. Reproduced through the exact
+    find_step_episodes(series, exclude=off) call the composition layer makes.
+    """
+    rng = np.random.default_rng(0)
+    values = ([0.0] * 45 + noisy(1000.0, 300, rng) + noisy(500.0, 300, rng))
+    series = s(values)
+    off = [(r.start, r.end) for r in find_off_runs(series) if r.notable]
+    assert off and off[0][0] == series.index[0], (
+        "fixture must open with a not-yet-launched off-window")
+
+    shifts = find_level_shifts(series)
+    launch = [sh for sh in shifts if sh.ratio is None]
+    assert launch, "fixture must produce a rise out of zero"
+    cut = [sh for sh in shifts if sh.delta < 0]
+    assert cut, "fixture must produce a later cut"
+    ratio = abs(cut[0].delta / launch[0].delta)
+    assert not 1 / params.EPISODE_MATCH_BAND <= ratio <= params.EPISODE_MATCH_BAND, (
+        f"fixture is pointless unless the cut is outside the band: {ratio}")
+
+    episodes = find_step_episodes(series, exclude=off)
+    assert episodes, "expected both shifts to be reported"
+    assert all(e.open_ended for e in episodes), (
+        "a launch out of zero must not claim an unrelated later cut as its "
+        f"reversal: {[(e.start, e.end, e.open_ended) for e in episodes]}")
 
 
 def test_a_noiseless_series_does_not_fire_on_a_trivial_shift():
@@ -270,3 +331,87 @@ def test_a_noiseless_series_does_not_fire_on_a_trivial_shift():
     """
     assert find_step_episodes(s([100.0] * 120 + [100.6] * 120)) == []
     assert find_step_episodes(s([100.0] * 120 + [103.0] * 120)) == []
+
+
+def weekly(level, n, rng, scale=0.12, amplitude=0.15, phase=0):
+    """A level carrying day-of-week structure as well as noise.
+
+    The flat `noisy` fixtures above are cleaner than any real media series: at
+    5% noise and no weekly shape a step is found at its own change point by
+    luck alone, which is why they could not show the defect the two tests below
+    exist for. These numbers are the shape of the series the detector actually
+    runs on.
+    """
+    return [level * (1 + amplitude * np.sin(2 * np.pi * (phase + i) / 7))
+            * (1 + rng.normal(0, scale)) for i in range(n)]
+
+
+def bounded_step(seed, pre=150, length=56, mult=3.0, post=150):
+    rng = np.random.default_rng(seed)
+    return (weekly(100.0, pre, rng)
+            + weekly(100.0 * mult, length, rng, phase=pre)
+            + weekly(100.0, post, rng, phase=pre + length))
+
+
+def test_both_edges_of_a_bounded_step_are_detected():
+    """Step recall was 2/13 on the development split because one edge or both
+    went missing on eleven of the thirteen step changes -- most often the
+    CLOSING one, which left the episode open-ended and dropped.
+
+    The cause was the z's scale: measured over the two comparison windows
+    CONCATENATED, it folded the candidate's own step into the denominator, and
+    hardest at the one index where the step is real -- there the pooled sample
+    is an even mixture of the two levels and |z| collapses to about
+    2 / MAD_TO_SIGMA whatever the step. |z| had a notch exactly where sharpness
+    has its peak, so a step cleared both gates only when noise happened to
+    leave one index in the overlap.
+
+    A 56-day step to 3x, on a series with day-of-week structure, over eight
+    seeds so no single draw can carry it. Restore the concatenated scale and
+    six of the eight lose an edge.
+    """
+    for seed in range(8):
+        ats = [sh.index for sh in find_level_shifts(s(bounded_step(seed)))]
+        assert any(abs(i - 150) <= 2 for i in ats), \
+            f"seed {seed}: opening shift missing: {ats}"
+        assert any(abs(i - 206) <= 2 for i in ats), \
+            f"seed {seed}: closing shift missing: {ats}"
+
+
+def test_the_z_at_the_change_point_itself_is_not_collapsed_by_its_own_step():
+    """The mechanism behind the test above, pinned on its own index.
+
+    The shift must be found AT the change point, not two weeks off it where the
+    comparison windows no longer straddle the transition -- and with a |z| that
+    reflects the step rather than the mixture. Restore the concatenated scale
+    and no candidate survives within two days of the change point at all.
+    """
+    found = [sh for sh in find_level_shifts(s(bounded_step(0)))
+             if abs(sh.index - 150) <= 2]
+    assert found, "the step must be found at the change point itself"
+    assert abs(found[0].z) >= params.Z_THRESH
+
+
+def test_no_shift_is_found_on_a_battery_of_series_with_no_level_change():
+    """The precision half of measuring the z's scale on each window separately.
+
+    Not folding the between-window difference into the denominator raises |z|
+    generally, so the cost has to be measured rather than argued. These series
+    have no level change to find: Gaussian noise at 5% and at 20%, and a series
+    whose swing is day-of-week seasonality rather than a budget decision. Forty
+    seeds each; any firing here is a false positive of exactly the kind the
+    null scenarios on the development split count.
+    """
+    for seed in range(40):
+        rng = np.random.default_rng(seed)
+        fixtures = {
+            "gaussian 5%": noisy(100.0, 400, rng),
+            "gaussian 20%": noisy(100.0, 400, rng, scale=0.2),
+            "day-of-week": [100.0 * (1 + 0.3 * np.sin(2 * np.pi * i / 7))
+                            * (1 + rng.normal(0, 0.1)) for i in range(400)],
+        }
+        for name, values in fixtures.items():
+            found = find_level_shifts(s(values))
+            assert found == [], (
+                f"seed {seed}, {name}: no level change to find, but reported "
+                f"{[(sh.index, round(sh.z, 2)) for sh in found]}")
