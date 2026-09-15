@@ -305,10 +305,15 @@ def _isolation_sentence(panel: Panel, event: DetectedEvent,
         off = off_mask(panel.series(country, ch), panel.present_mask(country, ch))
         if not bool(off.loc[event.start:event.end].any()):
             normal += 1
-    noun = "channel" if len(others) == 1 else "channels"
     if normal == len(others):
-        return (f"All {len(others)} other {noun} in {where} ran at normal "
+        if len(others) == 1:
+            # "All 1 other channel" is not a sentence -- read the whole
+            # module out loud, not just the numbers in it, and this is
+            # exactly the kind of thing that check catches.
+            return f"The other channel in {where} ran at normal levels throughout."
+        return (f"All {len(others)} other channels in {where} ran at normal "
                 f"levels throughout.")
+    noun = "channel" if len(others) == 1 else "channels"
     return (f"{normal} of {len(others)} other {noun} in {where} ran at "
            f"normal levels throughout the window.")
 
@@ -347,21 +352,24 @@ def explain(event: DetectedEvent, panel: Panel) -> str:
             # window) always lands in the window <= 0 case, so it always
             # reads "fell ... to exactly 0" without needing a type check.
             #
-            # The nonzero cases say "averaged" rather than hedging with
+            # The nonzero cases say "an average of" rather than hedging with
             # "about": the number is an exact, recomputable mean of the
             # window, not an estimate, and the brief's own register --
             # spec section 8's "to exactly EUR0" -- states both endpoints
-            # flatly. "Averaged" is precise about what kind of number this
-            # is (a window mean, not a single day's spend) without
-            # understating how sure the detector is of it.
+            # flatly. "An average of" is precise about what kind of number
+            # this is (a window mean, not a single day's spend) without
+            # understating how sure the detector is of it. It also has to
+            # read as a NOUN PHRASE, not a verb -- "level_word" fills the
+            # slot "... to {level_word} per day...", and "to averaged 405
+            # per day" is not a sentence a verb belongs in.
             if window <= 0:
                 verb, level_word = "fell", "exactly 0"
             elif window > typical:
-                verb, level_word = "rose", f"averaged {window:,.0f}"
+                verb, level_word = "rose", f"an average of {window:,.0f}"
             elif window < typical:
-                verb, level_word = "fell", f"averaged {window:,.0f}"
+                verb, level_word = "fell", f"an average of {window:,.0f}"
             else:
-                verb, level_word = "moved", f"averaged {window:,.0f}"
+                verb, level_word = "moved", f"an average of {window:,.0f}"
             parts.append(
                 f"{primary} {verb} from a typical {typical:,.0f} per day to "
                 f"{level_word} per day over this window.")
@@ -386,11 +394,11 @@ def explain(event: DetectedEvent, panel: Panel) -> str:
             if market_window <= 0:
                 verb, level_word = "fell", "exactly 0"
             elif market_window > market_typical:
-                verb, level_word = "rose", f"averaged {market_window:,.0f}"
+                verb, level_word = "rose", f"an average of {market_window:,.0f}"
             elif market_window < market_typical:
-                verb, level_word = "fell", f"averaged {market_window:,.0f}"
+                verb, level_word = "fell", f"an average of {market_window:,.0f}"
             else:
-                verb, level_word = "moved", f"averaged {market_window:,.0f}"
+                verb, level_word = "moved", f"an average of {market_window:,.0f}"
             n_channels = (len(panel.channels_in(event.country_code))
                          if event.country_code else len(subjects))
             parts.append(

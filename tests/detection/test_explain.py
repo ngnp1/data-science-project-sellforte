@@ -244,3 +244,66 @@ def test_a_natural_holdout_names_the_other_channels_that_ran_normally():
     e = event(p, "TV", 60, 89, event_type="natural_holdout")
     text = explain(e, p)
     assert "All 2 other channels in DE ran at normal levels throughout." in text
+
+
+def test_the_level_sentence_reads_as_grammatical_prose_not_a_fragment():
+    """Round 3 finding: the hedge-removal fix swapped "about" for "averaged"
+    and produced "to averaged 405 per day" -- a verb where the sentence
+    needs a noun phrase, not English. Seventeen tests passed on that broken
+    sentence because every one of them only checked that a number ("405")
+    was present, never that the sentence around it was well-formed -- the
+    same failure mode as a bare "30" matching a date. Assert the FULL
+    sentence here, not a fragment, and also guard the whole class of defect:
+    no verb may ever follow "to " in the level clause, for any direction."""
+    p = build({"TV": [1000.0] * 60 + [80.0] * 30 + [1000.0] * 60,
+               "Radio": [50.0] * 150})
+    e = event(p, "TV", 60, 89, event_type="natural_holdout")
+    text = explain(e, p)
+    assert ("TV fell from a typical 1,000 per day to an average of 80 per "
+           "day over this window.") in text
+    for bad_verb in ("averaged", "rose", "fell", "moved"):
+        assert f"to {bad_verb}" not in text
+
+
+def test_the_level_sentence_reads_naturally_when_spend_rises():
+    """Same grammar check as above, in the RISING direction (a step_change
+    budget increase), which is the case that first exposed the directional
+    "fell"/"rose" logic in round 1 -- the full sentence must still parse as
+    English after the round-3 wording fix."""
+    p = build({"TV": [100.0] * 75 + [300.0] * 75, "Radio": [50.0] * 150})
+    e = event(p, "TV", 75, 149, event_type="step_change", magnitude_ratio=3.02,
+              evidence={"z": 6.0})
+    text = explain(e, p)
+    assert ("TV rose from a typical 100 per day to an average of 300 per "
+           "day over this window.") in text
+
+
+def test_the_market_total_level_sentence_also_reads_as_grammatical_prose():
+    """The market-total sentence (dark_period) shares the exact same
+    verb/level_word slot pattern as the single-channel sentence, so it needs
+    the same full-sentence check -- fixing one copy of the bug and leaving
+    the other broken is exactly the kind of thing a fragment-only assertion
+    would miss."""
+    p = build({"TV": [1000.0] * 60 + [80.0] * 30 + [1000.0] * 60,
+               "Radio": [500.0] * 60 + [50.0] * 30 + [500.0] * 60})
+    e = event(p, None, 60, 89, event_type="dark_period")
+    text = explain(e, p)
+    assert ("Total spend across 2 channels in DE fell from a typical 1,500 "
+           "per day to an average of 130 per day over this window.") in text
+    for bad_verb in ("averaged", "rose", "fell", "moved"):
+        assert f"to {bad_verb}" not in text
+
+
+def test_the_isolation_sentence_reads_naturally_with_exactly_one_other_channel():
+    """Found by reading the channel_pulse output during round 3's prose
+    read: with only one other channel in the market, the isolation sentence
+    said "All 1 other channel in DE ran at normal levels throughout." --
+    "All 1" is not English, the same class of defect as "to averaged 405".
+    A 2-channel market (TV holdout, Radio the only other channel) exercises
+    exactly this case."""
+    p = build({"TV": [100.0] * 60 + [0.0] * 30 + [100.0] * 60,
+               "Radio": [50.0] * 150})
+    e = event(p, "TV", 60, 89, event_type="natural_holdout")
+    text = explain(e, p)
+    assert "The other channel in DE ran at normal levels throughout." in text
+    assert "All 1" not in text
