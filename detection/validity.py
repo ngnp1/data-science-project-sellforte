@@ -39,7 +39,8 @@ SUSPECT_TRACKING_LOSS = "suspect_tracking_loss"
 # hole in it is still a hole. It is excluded here anyway, deliberately, because
 # widening it is a change to WHAT THE GATE REPORTS rather than a correction of
 # something it states falsely, and this branch does not add reach to a gate on
-# the way out the door. Recorded as an open design question in REPORT.md.
+# the way out the door. Documented as an open design question in REPORT.md §11
+# ("The missing-rows trigger excludes step changes deliberately").
 # tests/detection/test_validity.py pins the exclusion behaviourally, on a step
 # window that really does have missing rows.
 _STOPPING_TYPES = frozenset({"dark_period", "single_channel", "natural_holdout",
