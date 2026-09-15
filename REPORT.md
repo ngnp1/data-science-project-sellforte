@@ -16,6 +16,15 @@ scenarios. The sealed split was read **exactly once**, at the end.
 `benchmark/eval/final_runs.jsonl` contains **exactly one line**. There is no repeat-run
 banner on this report, and a second run would produce one permanently.
 
+**One disclosure about the code you are being handed.** After the sealed run, the final review
+found the validity gate stating falsehoods about its own subject windows (§11). It was fixed.
+`detection/` therefore no longer hashes to the `aef7282c…` recorded in `final_runs.jsonl`. The
+change is **score-neutral by construction** — `validity` is not carried across
+`benchmark/eval/adapter.py` and no harness metric reads it — and the dev split reproduces
+exactly before and after: P 0.943 / R 0.880 / F1 0.910, null FP 0.000, the same 70 detections
+over the same windows. No test-split number in this report was re-measured, and none needed
+to be. Every other line of `detection/` is the code that produced the sealed result.
+
 ---
 
 ## 1. What this detects, and how to run it
@@ -187,8 +196,11 @@ is load-bearing, not cosmetic: benchmark truth groups pulses the same way, and a
 emitting one event per window would score an IoU around 0.12 against grouped truth and match
 nothing.
 **Parameters:** `PULSE_MIN_RUNS`, `PULSE_LEN_IQR_RATIO`, plus all of P1's.
-**Caveat that no score reveals:** a regular train of **six or more** windows is suppressed
-entirely. See §11.
+**Caveat that no score reveals:** a regular train of **six or more** windows is never
+*grouped* — P1's notability rule leaves no run notable, so P3 emits no train. The windows are
+**still reported**, as one separate event each and of the wrong type. Measured end to end on a
+20-on/10-off train: 6 windows → **6 `natural_holdout` events**, 7 → 7, and 6 × `dark_period`
+in a one-channel market. See §11.
 
 ### staggered_launch — test F1 **0.970** (P 0.941 / R 1.000, 16 TP, 1 FP, 0 FN)
 
@@ -504,7 +516,7 @@ against the development split.
 | `Z_THRESH` | 3.5 | step sensitivity | The dominant precision/recall lever for step changes. The benchmark's 50-day gradual ramp — a non-event — clears the z gate (max \|z\| 4.761 after the sigma fix); `SHARPNESS`, not this, is what rejects it. |
 | `SHARPNESS` / `SHARPNESS_WINDOW` | 0.6 / 3 | ramp rejection | **The load-bearing gate against gradual ramps.** The benchmark's own blocked ramp lands 0.355 of its change inside the window, ≈41% below threshold — rejected with room to spare. Persistence does *not* reject a ramp: a ramp's new level genuinely holds. Lowering this turns ramps into false steps. Measured boundary on a synthetic flat rise: ≤4 days reads as a step, ≥7 days never does, crossover near 5. |
 | `MIN_DAYS` | 7 | shortest reportable event | At 7 the benchmark's deliberate 5-day event is undetectable and surfaces as an honest false negative (test duration bucket `<14 days`: recall 0.000, n=1). Lowering it to catch that case floods the output with noise. |
-| `RUN_RATIO` / `MIN_RUNS_FOR_RATIO` | 3.0 / 5 | intermittent-channel guard | The main false-positive lever on flighting channels. A channel with routine 3-day gaps needs ≈9 off-days to register; a never-off channel needs 7. **A single global threshold fails one of those two cases whichever value is chosen** — and this rule is also what suppresses a six-window pulse train entirely (§11). |
+| `RUN_RATIO` / `MIN_RUNS_FOR_RATIO` | 3.0 / 5 | intermittent-channel guard | The main false-positive lever on flighting channels. A channel with routine 3-day gaps needs ≈9 off-days to register; a never-off channel needs 7. **A single global threshold fails one of those two cases whichever value is chosen** — and this rule is also what stops a six-window pulse train from being grouped, fragmenting it into one wrong-type event per window (§11). |
 | `W` | 21 | level-shift comparison half-window | A multiple of 7 so day-of-week structure cancels. Shorter gives a noisier z; longer misses short steps. Also the width of the non-maximum suppression neighbourhood, which is where a step adjacent to a pause loses its closing edge (§6). |
 | `EPISODE_MATCH_BAND` | 2.0 | step-episode pairing tolerance | Wider pairs a step's end with an unrelated later shift; narrower leaves real episodes open-ended, running to the series end — and open-ended episodes are currently **dropped**. |
 | `ONSET_SPREAD` | 14 | staggered-launch trigger | Below it, differing onset dates read as coincidental start-up jitter. |
@@ -514,7 +526,7 @@ against the development split.
 | parameter | value | role |
 |---|---|---|
 | `EPS_ABS` | 1e-6 | absolute floor so float noise around zero is not spend |
-| `SIGMA_FLOOR` | 0.05 | lower bound on MAD scale; a near-constant window cannot produce an unbounded z |
+| `SIGMA_FLOOR` | 0.05 | lower bound on the MAD scale. **Not the rare safety rail this row used to describe: it binds at 45.1% of positions.** Measured over all 600,160 candidate positions on dev, the unfloored two-sided sigma falls at or below the floor at **270,452** of them; the median applied sigma is 0.0528 against a floor of 0.05. Where it binds, the "robust MAD-scaled z" is not adaptive at all — `Z_THRESH = 3.5` becomes a fixed cut of 0.175 in log1p space, about a 19% level change. Defensible, but a different mechanism from the adaptive one the phrase implies |
 | `PERSIST` / `PERSIST_FRACTION` | 14 / 0.5 | the new level must still hold 14 days later at ≥ half the opening delta — rejects spikes |
 | `ROLLING` | 7 | centred rolling median for level work |
 | `MAD_TO_SIGMA` | 1.4826 | MAD → σ for a normal distribution (in params because a test bans this literal from logic modules) |
@@ -547,9 +559,9 @@ calibration collapsed, so it is not. Treat those weights as policy, not as measu
 | # | failure | measured cost |
 |---|---|---|
 | 1 | **Open-ended step episodes are dropped.** A step episode with no matching reversal has an end given by the series end, not by measurement, so it is discarded. | Safe on this benchmark — every generated step reverts inside the series, verified in `benchmark/spec/events.py`. On dev the raw step pass produces **187 open-ended episodes against 11 bounded ones**. A real budget change that never reverts is currently **missed entirely**. §11. |
-| 2 | **Market-wide step moves are not collapsed.** A budget change applied to a whole market emits one event per channel rather than one market event. | Currently invisible: 0 same-day 3+-channel groups survive to the output. But in the raw episodes, **8 same-day clusters of up to nine channels** are waiting (dev_035/FR 9, dev_033/FI 8, dev_035/AT 8, dev_030/DE 7, dev_032/PL 7, dev_033/CH 7, dev_034/FI 7, dev_029/US 5). They are suppressed *only* as a side effect of failure 1. Relax 1 without fixing 2 and step precision collapses. |
+| 2 | **Market-wide step moves are not collapsed.** A budget change applied to a whole market emits one event per channel rather than one market event. | Currently invisible: 0 same-day 3+-channel groups survive to the output. But in the raw P2 output, **10 same-day same-direction clusters of 5 or more channels** are waiting (dev_035/FR 9, dev_033/FI 8, dev_035/AT 8, dev_030/DE 7, dev_032/PL 7, dev_033/CH 7, dev_034/FI 7, dev_029/US 5, dev_030/PL 5, dev_034/NO 5 — the last two were missing from this list until the final review). Counting same-day *downward* clusters as well brings it to **17**, the largest carrying **10** channels (dev_029/US, dev_033/CH, dev_034/FI). They are suppressed *only* as a side effect of failure 1. Relax 1 without fixing 2 and step precision collapses. |
 | 3 | **A step that reverts shortly before the channel pauses loses its closing edge.** `W`-wide non-maximum suppression: the drop into the off-window is a far larger delta and suppresses the step's closing shift inside the 21-day neighbourhood. | Reproduced deliberately: the bounded episode is lost whenever the gap is ≤ 8 days. Not caused by the off-window exclusion (identical with `exclude=[]`). Pre-existing, and **not exercised by the benchmark at all** — truth never puts a step and a holdout on the same channel in the same country. Real data produces this shape routinely. |
-| 4 | **A six-or-more-window pulse train is suppressed entirely.** At six windows the `RUN_RATIO` rule switches on and every run's peers are its own length, so none is notable. | Cannot fire on this benchmark (the pulse family draws 2–4 windows), so no score reveals it. On real flighting data it is the normal case. Documented and pinned by a test that states it. **Highest-priority spec question before production use.** §11. |
+| 4 | **A six-or-more-window pulse train is mis-typed and fragmented, not suppressed.** At six windows the `RUN_RATIO` rule switches on and every run's peers are its own length, so none is notable and P3 groups nothing — but regime segmentation never consults notability, so **every window is still emitted as its own event, of the wrong type**. | Reproduced end to end: 6 windows → 6 × `natural_holdout` (6 × `dark_period` in a one-channel market), 7 → 7; 5 windows still give the correct single `channel_pulse`. Each fragment carries holdout's `TYPE_PRIOR` 0.75 instead of pulse's 0.9 and loses its `components` — informativeness 0.679 per fragment against 0.855 for the grouped pulse. Cannot fire on this benchmark (the pulse family draws 2–4 windows), so no score reveals it. On real flighting data it is the normal case. **Highest-priority spec question before production use.** §11. |
 | 5 | **Two-channel markets are label-ambiguous.** The same spend shape is `single_channel` in some truth families and `natural_holdout` in others. | Test recall 0.429 in the `n_channels = 2` bucket (7 scenarios), precision 1.000. Worth 6 events on dev. No spend-only rule separates them; the detector's rule is a deliberate prior and was not fitted to the scenarios that would reveal it. |
 | 6 | **Holdout versus staggered launch on a dormant market.** A market dormant for the first 60 days with no ramp-up is both, depending on which family drew it. | 1 FP + 1 FN on the test split (the single type substitution). On dev, launch wins 10 events to 1. Benchmark ambiguity, not a detector defect. |
 | 7 | **Edge-censored windows.** A holdout at day 0, at the series end, or spanning the whole series. | Accounted for 3 FN plus the single launch FP on dev. On test, the edge family scores P 0.900 / R 0.643 / F1 0.750 — the worst family by a wide margin, and where essentially all remaining loss lives. |
@@ -569,7 +581,7 @@ calibration collapsed, so it is not. Treat those weights as policy, not as measu
 | **Near-zero versus exact-zero** | Both handled. Near-zero recall is **1.000** on the test split (10 events), exact-zero 0.944 (72 events). The explanation wording distinguishes them: "was cut to a trickle … to an average of 405 per day" rather than "stopped … to exactly 0". | Test magnitude and `zero_kind` breakdowns. |
 | **Back-to-back events** (a holdout ends, a step begins the next day) | Handled structurally: regime segmentation cuts the timeline wherever the active-channel set changes *or* a P2 change point lands, so adjacent events do not merge. The step pass excludes the drop *into* an off-window but keeps the rise *out* of it, since the rise carries the level change across the pause. | Dedicated tests in `tests/detection/test_level_shift.py`; the sealed split contains a back-to-back edge case. |
 | **Overlapping events on one channel** | Both can be reported; the overlap is priced into informativeness through `CONFOUNDED_PENALTY` (0.6) rather than one event being suppressed. | `cleanliness` driver in `detection/score.py`. |
-| **Single-channel market** | Dark and holdout are genuinely indistinguishable with one channel, and the benchmark says so. The `single_channel` label requires `len(off) > 1`, so a one-channel market can only produce a dark period. | Test `n_countries = 1` bucket scores 1.000 across the board (8 scenarios). |
+| **Single-channel market** | Dark and holdout are genuinely indistinguishable with one channel, and the benchmark says so. The `single_channel` label requires `len(off) > 1`, so a one-channel market produces no `single_channel` and no `natural_holdout`. **It can produce a `channel_pulse` as well as dark periods, and the two overlap:** the pulse pass runs before regime segmentation but only claims windows a train actually grouped, so a 5-window flighting single-channel market emits 5 × `dark_period` **and** 1 × `channel_pulse` over the same days — duplicate coverage of identical dates. Not exercised by the benchmark; worth knowing before running on a single-channel market. | Test `n_countries = 1` bucket scores 1.000 across the board (8 scenarios). Duplicate coverage reproduced on a synthetic 20-on/10-off train. |
 | **All-zero channel** (booked but never run) | Excluded everywhere. `channels_in()` filters on spend > 0, so such a channel is neither reported as one giant holdout nor counted as a peer control. A market that never bought a channel **abstains** from the cross-market vote in both directions. | `find_off_runs` returns `[]` on an all-zero series; verified for NaN/inf safety across all five normalize functions. |
 | **Naturally intermittent channel** (≈20 alternating 3-day gaps) | Correctly silent. `RUN_RATIO` makes the notability floor `max(7, 3 × p90(other runs)) = 9`, so routine gaps never register — and the injected 42-day holdout in that same series still does. | Boundary tests pin that an 8-day run is not notable and a 10-day run is. This is also failure mode 4. |
 | **Gradual ramp** (10-day blocks at 1.2×…2.0×) | No step, no event. Rejected by `SHARPNESS`, which holds with ≈41% margin. | `test_the_benchmarks_own_blocked_ramp_emits_no_step`. |
@@ -588,11 +600,11 @@ half-life estimate research-only. **The measurements disagree in three places.**
 | detector | verdict | grade against the expectation |
 |---|---|---|
 | **dark_period** | **Production-ready.** 1.000/1.000/1.000 on test, 1.000 on dev, zero errors of any kind on either split. | As expected. |
-| **channel_pulse** | **Production-ready on this benchmark — but do not deploy without answering the six-window question.** 1.000 across the board on both splits. | **Better than expected on the score, worse in reality.** The expectation was "promising"; the score says perfect. Both readings are wrong for production, because the benchmark's pulse family draws only 2–4 windows and a real flighting channel with six or more regular windows is suppressed **entirely** — and no score in this report can reveal that. A perfect F1 on a family whose defining production case is excluded by construction is the most misleading number in the document. |
+| **channel_pulse** | **Production-ready on this benchmark — but do not deploy without answering the six-window question.** 1.000 across the board on both splits. | **Better than expected on the score, worse in reality.** The expectation was "promising"; the score says perfect. Both readings are wrong for production, because the benchmark's pulse family draws only 2–4 windows, and a real flighting channel with six or more regular windows is **never grouped into a pulse at all — it comes back as N separate holdouts of the wrong type** — and no score in this report can reveal that. A perfect F1 on a family whose defining production case is excluded by construction is the most misleading number in the document. |
 | **single_channel** | **Production-ready with a caveat.** 1.000 on test, but 0.824 on dev (R 0.700) — and the gap is the two-channel labelling ambiguity, where test recall is 0.429. | As expected on clean multi-channel markets. Add: **on two-channel markets the label is a coin-flip in the truth itself**, so treat `single_channel` versus `natural_holdout` there as an open question for a human, not an answer. |
 | **staggered_launch** | **Production-ready for detection, not for the label.** R 1.000 on test with one FP; 0.952 on dev. Onset dates are exact. | **Better than expected** — "promising" understates it. Two real gaps: a launch is never checked for being *sustained*, and a dormant-then-active market is genuinely ambiguous with a censored holdout. |
 | **natural_holdout** | **Production-ready with supervision.** 0.898 on test (P 0.957 / R 0.846), 0.821 on dev. Near-zero recall 1.000. All errors are label substitutions on correctly located windows. | **Slightly below the expectation.** It is the type the `RHO` change rescued (dev recall 0.550 → 0.800) and it remains the type most sensitive to that threshold. `RHO` is a business question on real data, so this detector's real-world accuracy is **the accuracy of that one decision**. |
-| **step_change** | **NOT production-ready. Ship it behind a review queue, not into a pipeline.** 0.857 on test (P 1.000 / R 0.750), 0.917 on dev, and 1.000 on the clean `step` family. | **This is the significant disagreement with the expectation.** The expectation was "production-ready with a ramp caveat". The ramp caveat is in fact the *least* of it — sharpness rejects the benchmark's ramp with 41% margin. The real disqualifier is structural: **187 of 198 raw step episodes are open-ended and thrown away unexamined**, a real never-reverting budget change is silently dropped, a step that reverts shortly before a pause loses its closing edge, and behind the drop rule sit 8 uncollapsed market-wide clusters. Test precision of 1.000 is real, but it is achieved by a filter that is also discarding the most common real-world step shape. |
+| **step_change** | **NOT production-ready. Ship it behind a review queue, not into a pipeline.** 0.857 on test (P 1.000 / R 0.750), 0.917 on dev, and 1.000 on the clean `step` family. | **This is the significant disagreement with the expectation.** The expectation was "production-ready with a ramp caveat". The ramp caveat is in fact the *least* of it — sharpness rejects the benchmark's ramp with 41% margin. The real disqualifier is structural: **187 of 198 raw step episodes are open-ended and thrown away unexamined**, a real never-reverting budget change is silently dropped, a step that reverts shortly before a pause loses its closing edge, and behind the drop rule sit 10 uncollapsed market-wide clusters. Test precision of 1.000 is real, but it is achieved by a filter that is also discarding the most common real-world step shape. |
 | **adstock half-life estimate** | **Not implemented.** `ADSTOCK_HALF_LIFE = 7.0` is an assumed constant feeding informativeness ranking only; no decay is fitted and no half-life is estimated. | As expected (research-only), but stated plainly: there is nothing here to grade. |
 | **confidence calibration** | **Not usable.** Constant 0.943; cannot rank, cannot gate. | Not in the expectation. §4 and §11. |
 
@@ -655,6 +667,12 @@ What the trajectory shows:
 - **The frozen hash `aef7282c…` in record 22 is byte-identical to the hash in
   `final_runs.jsonl`.** The code that scored 0.910 on dev is exactly the code that scored
   0.947 on the sealed split. Nothing was changed between calibration and the final run.
+  **After** it, one score-neutral fix to `detection/validity.py` and one docstring correction
+  in `detection/primitives/pulse.py` landed in response to the final review (§11), so the
+  shipped tree no longer matches that hash. Both are annotation-only: `validity` never crosses
+  `benchmark/eval/adapter.py`, docstrings are inert, and the dev split reproduces P 0.943 /
+  R 0.880 / F1 0.910 / null FP 0.000 with an identical event list. The sealed numbers are
+  untouched and were not re-measured.
 
 Two further checks were recorded during development: the test split's seal verified clean and
 `final_runs.jsonl` was confirmed absent immediately before the final run, and the newest file
@@ -711,8 +729,14 @@ correctness (§4). The usable procedure instead:
 - Run the detector. At benchmark density expect roughly 1.7 events per scenario (92
   detections across 55 test scenarios).
 - **Drop nothing on confidence.** Record it as "these are ~94% right in aggregate".
-- **Filter on `validity` first** — anything not `ok` is a data question, not a marketing
-  finding, and belongs with the pipeline owner rather than the analyst.
+- **Do not filter on `validity`.** An earlier draft of this report told you to drop anything
+  not `ok`. Do not: on the only data where the gate can be checked it flags **7 of 70**
+  detections, **all 7 of them correct events**, and catches **none of the 4 false positives**
+  (§11). It is an annotation to read, not a gate to act on. Read `validity_reasons` on the
+  events it marks — each reason now states what the spend actually did — and send a
+  `suspect_data_gap` to the pipeline owner, because missing-rows-versus-zero is recommendation
+  1 and a real export question. But dropping everything not `ok` would discard 10% of correct
+  output and remove no error.
 - **Sort by `informativeness`** and review the top N. That score still discriminates: it ranks
   a long, clean, exact-zero holdout with live peer markets above a short reduced-spend step in
   a noisy market, which is the right order for an analyst choosing what to look at.
@@ -782,9 +806,11 @@ episode without a matching reversal. Seventeen unpairable shifts for every paire
 That rule **must be relaxed for production** — a real budget change that never reverts is
 currently dropped, and real budgets change without reverting all the time. But relaxing it
 requires **collapsing market-wide moves first, not afterwards**: behind the drop rule sit
-**8 same-day clusters of up to nine channels** (dev_035/FR 9, dev_033/FI 8, dev_035/AT 8,
-dev_030/DE 7, dev_032/PL 7, dev_033/CH 7, dev_034/FI 7, dev_029/US 5). Every one is currently
-open-ended and therefore already discarded. Relax the drop rule without a market-wide collapse
+**10 same-day same-direction clusters of 5 or more channels** (dev_035/FR 9, dev_033/FI 8,
+dev_035/AT 8, dev_030/DE 7, dev_032/PL 7, dev_033/CH 7, dev_034/FI 7, dev_029/US 5,
+dev_030/PL 5, dev_034/NO 5 — the last two were missed until the final review; counting
+same-day downward clusters too the figure is 17, the largest carrying 10 channels). Every one
+is currently open-ended and therefore already discarded. Relax the drop rule without a market-wide collapse
 rule and those return as *closed* episodes, and step precision — 1.000 on the test split —
 collapses. The order of operations is not negotiable.
 
@@ -793,18 +819,42 @@ the output it could not have been verified by any behavioural test, only by a va
 and this branch twice removed unreachable gates for exactly that reason. The consequence is
 quantified above rather than predicted.
 
-### A regular pulse train of six or more windows is suppressed entirely
+### A regular pulse train of six or more windows is mis-typed and fragmented
 
 At six windows the `RUN_RATIO` notability rule switches on and every run's peers are its own
-length, so no run clears `3 × p90(other runs)` and **nothing is reported at all**. The code is
-faithful to spec §7's P1 definition; **the conflict is in the spec**, not in the
-implementation.
+length, so no run clears `3 × p90(other runs)` and **P3 groups nothing**. The code is faithful
+to spec §7's P1 definition; **the conflict is in the spec**, not in the implementation.
+
+**The train is not silent.** Earlier drafts of this report said it was "suppressed entirely"
+and that "nothing is reported at all"; that was wrong, and the final review caught it. The
+unit test that pins this limitation is about P1 and P3 only — `notable_runs` and
+`find_pulse_trains` — and regime segmentation in `detection/compose/label.py` never consults
+P1 notability. Every window therefore still reaches the output, as a **separate event of the
+wrong type**. Reproduced end to end on the test's own fixture shape (20 on / 10 off):
+
+| windows | `notable_runs` (P1) | pipeline output |
+|---|---|---|
+| 5 | 5 | 1 × `channel_pulse` (correct, informativeness 0.855) |
+| 6 | 0 | **6 × `natural_holdout`** (informativeness 0.679 each) |
+| 7 | 0 | **7 × `natural_holdout`** |
+
+In a one-channel market the same train yields 6 × `dark_period`.
+
+**The direction of the risk matters.** Silence loses a finding and is safe — you know you have
+nothing, and you go and look. What actually happens is **type error and fragmentation**: N
+plausible-looking events of the wrong type, each carrying `natural_holdout`'s `TYPE_PRIOR`
+0.75 instead of `channel_pulse`'s 0.9, each ranked and triaged as an independent holdout, none
+carrying the `components` that make a train legible, and the adstock-observability rationale
+that makes a pulse train the most valuable thing this detector can find silently lost. A
+client told the system goes quiet will look elsewhere for the finding; what they will actually
+get is a flood of mis-typed ones.
 
 The benchmark's pulse family draws 2–4 windows, so no score in this report can reveal it —
 `channel_pulse` reads a perfect 1.000 on both splits. **On real flighting data, six or more
 regular windows is the normal case.** This is the **highest-priority spec question before
 production use**: the type with the best score in the benchmark may be the type that fails
-most often in production, and nothing here would have caught it.
+most often in production, and nothing here would have caught it. Pinned end to end by
+`tests/detection/test_pipeline.py::test_a_six_window_train_fragments_into_separate_wrong_type_events`.
 
 ### Two dev scenarios are the same data with different truth labels
 
@@ -849,6 +899,59 @@ of recommendation 10(c).
 it asks only whether this market's turnover is quiet enough for *any* response to be readable
 — a noise measurement — never whether the spend change caused a sales change.)
 
+### The validity gate fires only on correct events, and catches none of the errors
+
+Measured across all 45 dev scenarios — the only data where the gate can be checked at all,
+since it needs the truth to say whether a flagged detection was right:
+
+| | flagged | of those, true positives | of the 4 false positives, caught |
+|---|---|---|---|
+| **as shipped now** | **7 of 70** | **7** | **0** |
+| before the fix below | 17 of 70 | 17 | 0 |
+
+**A gate that fires only on correct events cannot be used as a filter**, which is why
+recommendation 10.5 now says so explicitly instead of the opposite. This report applies that
+scepticism to `raw_confidence` in §4 and applied none at all to `validity` until the final
+review; the omission was the more serious of the two, because §10.5 had promoted the gate to
+an operating instruction.
+
+**What was wrong, and what was fixed.** Of the 15 `suspect_tracking_loss` verdicts in the
+before-row, **all 15 were false statements**, in two distinct ways, and both were fixed in
+`detection/validity.py`:
+
+- **Grouped windows (8 pulse events).** A `channel_pulse` spans first start to last end, so
+  its window includes the active days *between* pulses. The trigger asked two separate
+  questions of that span — "was any day off?" and "does the span carry impressions?" — and
+  both are yes for every pulse train that ever ran. `dev_019` DE/Affiliate: a 119-day window,
+  56 off days carrying **exactly 0** impressions, 63 on days carrying all **8,635,812** of
+  them — and the gate printed "spend is zero but impressions continue in the window". The
+  trigger now evaluates the **intersection** (impressions on the days spend was off) over the
+  event's real windows, which grouped events carry in `components`. All 8 verdicts are gone.
+- **Near-zero events (7 holdouts, 5 of them still flagged).** `off_mask` calls a day off at a
+  fraction of the active level, not at zero, so a near-zero holdout is "off" while still
+  buying: `dev_012` SE/Radio spends **36,466** across its 90 "off" days (`dev_034` DE/TV 425,
+  `dev_032` FR/OOH 135) and the impressions are simply proportional to that residual spend.
+  The reason string said "spend is zero". It now follows `OffRun.kind` — the same source of
+  truth `detection/explain.py` uses to say "cut to a trickle" rather than "stopped" — and says
+  what the spend actually did, rating its own evidence down accordingly. The **5 remaining**
+  tracking-loss verdicts are all of this kind: true sentences about real near-zero windows,
+  and still not evidence of anything wrong.
+
+**So the gate's honest description is:** `suspect_data_gap` on a panel-wide simultaneous stop
+(2 on dev, both correct dark periods in `dev_045`, and a feed outage is a real alternative
+explanation there), plus `suspect_tracking_loss` on near-zero windows where impressions track
+the residual spend. It has never yet flagged an error this benchmark contains. The
+missing-rows trigger — the one that addresses recommendation 1, the largest real-data risk —
+**never fires on any of the 45 dev scenarios**, because none of them omits rows; it is
+covered by unit fixtures only. Treat the whole gate as untested against the failure it was
+built for, and re-measure it on real data before relying on any of it.
+
+**What this cost the provenance.** The fix changes `detection/`, so the shipped source no
+longer hashes to the `aef7282c…` recorded in `final_runs.jsonl`. It is **score-neutral by
+construction**: `validity` is not carried across `benchmark/eval/adapter.py`, no harness
+metric reads it, and the dev split reproduces exactly — P 0.943 / R 0.880 / F1 0.910, null FP
+0.000, the same 70 detections with the same boundaries — before and after. See §9.
+
 ### Review provenance: two of twelve tasks were reviewed by the controller
 
 Of the twelve tasks in the final plan, ten received an independent review by a separate agent.
@@ -871,11 +974,12 @@ are deciding how much of this to re-verify yourself, **start with `detection/val
   only and never detection, so it cannot cause a false positive — but the "duration adequacy"
   driver is scored against a number nobody measured. Spec §7's post-pulse adstock decay fit is
   not implemented at all.
-- **The test suite has two known failures**, both in `tests/eval/test_gating.py` (lines 182 and
-  266), and both assert that `benchmark/eval/final_runs.jsonl` **does not exist** — a
-  precondition that held throughout development and became false the moment the sanctioned
-  final run was made. They are stale test scaffolding, not a detector defect: 579 of 581 tests
-  pass and no detection test is affected.
+- **The test suite is green.** Two assertions in `tests/eval/test_gating.py` used to require
+  that `benchmark/eval/final_runs.jsonl` **does not exist** — a precondition that held
+  throughout development and became false the moment the sanctioned final run was made. Commit
+  `afe1cec` rewrote both to assert the file's **immutability** instead, which preserves the
+  original leak-check intent and works on a fresh clone. An earlier draft of this report,
+  written one commit before that fix, told you the suite was red at 579 of 581; it is not.
 
 ---
 

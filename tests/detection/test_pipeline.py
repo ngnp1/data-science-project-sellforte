@@ -150,6 +150,64 @@ def test_a_pulse_train_stays_one_grouped_event():
     assert all(a <= b for a, b in pulses[0].components)
 
 
+def _flighting_frame(n_pulses, channels, n_on=20, n_off=10, country="DE"):
+    """A regular flighting train on the first channel: `n_pulses` windows of
+    `n_off` days off, separated by `n_on` days on. Any further channels run
+    flat throughout, so the market has peers."""
+    values = []
+    for _ in range(n_pulses):
+        values += [1000.0] * n_on + [0.0] * n_off
+    values += [1000.0] * n_on
+    dates = pd.date_range("2024-01-01", periods=len(values), freq="D")
+    rows = []
+    for i, day in enumerate(dates):
+        for ch in channels:
+            spend = values[i] if ch == channels[0] else 1000.0
+            rows.append({"date": day, "country_code": country,
+                         "advertising_channel": ch,
+                         "media_investment": spend,
+                         "clicks": spend / 10, "impressions": spend * 100})
+    return pd.DataFrame(rows)
+
+
+def test_a_six_window_train_fragments_into_separate_wrong_type_events():
+    """The SYSTEM-level consequence of the six-window pulse limitation.
+
+    tests/detection/test_pulse.py pins the primitives: at six regular windows
+    RUN_RATIO leaves no run notable, so P3 groups nothing. It is easy -- and
+    the handover report did it in four places -- to read that as "the train is
+    suppressed entirely" and "nothing is reported at all". It is not. Regime
+    segmentation cuts the timeline on the active-channel set and never asks P1
+    whether a run was notable, so every window still reaches the output; it
+    just arrives as N independent events carrying the wrong type, the wrong
+    span, and natural_holdout's lower TYPE_PRIOR instead of channel_pulse's.
+
+    Silence would be safe: an analyst who is told the detector goes quiet on
+    flighting data knows to look elsewhere. Fragmentation is not -- N
+    plausible-looking holdouts are triaged one by one and the
+    adstock-observability rationale that makes a pulse train worth finding is
+    silently lost. This test exists so the disclosure in REPORT.md cannot
+    quietly revert to the comfortable version.
+    """
+    five = run_detection(_flighting_frame(5, ["TV", "Radio"]), None, "syn")
+    assert [e.event_type for e in five] == ["channel_pulse"]
+    assert len(five[0].components) == 5
+
+    for n in (6, 7):
+        events = run_detection(_flighting_frame(n, ["TV", "Radio"]), None, "syn")
+        assert [e.event_type for e in events] == ["natural_holdout"] * n, (
+            f"{n} windows: expected {n} fragmented holdouts, got "
+            f"{[e.event_type for e in events]}")
+        assert all(e.components == () for e in events)
+        # Each fragment is ranked BELOW the single grouped pulse it should
+        # have been: the type prior is the whole difference.
+        assert all(e.informativeness < five[0].informativeness for e in events)
+
+    # A one-channel market reports the same train as dark periods instead.
+    one = run_detection(_flighting_frame(6, ["TV"]), None, "syn")
+    assert [e.event_type for e in one] == ["dark_period"] * 6
+
+
 def test_every_event_names_a_market():
     """A staggered launch is fanned out to one event per launching market. A
     panel-level event with country_code None matches no truth row at all --
