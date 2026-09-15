@@ -163,3 +163,39 @@ def test_deleting_the_caveat_line_is_caught_by_the_suspect_test():
                                 "rows rather than zero-spend rows",))
     text = explain(e, p)
     assert "5 of 30 days" in text
+
+
+def test_a_dark_period_states_the_market_total_typical_and_window_level():
+    """dark_period's `channel` is always None, so the single-channel 'fell
+    from a typical X to Y' sentence has nothing to read -- this is the gap
+    the coordinator found in dev_005: the explanation for the detector's
+    strongest event type named no spend magnitude at all. The market-level
+    fallback must report the TOTAL across every channel the market runs,
+    computed the same active-days-median way as the single-channel case.
+
+    Both TV and Radio are built so their outside-window levels (100 and 80)
+    are distinct and sum to an unambiguous total (180) that cannot arise
+    from either channel alone or from any date/count already in the text --
+    unlike a bare "4", "180" cannot come from a coincidental "2024" in a
+    date string, and asserting the whole phrase (not just the number) also
+    catches a template that reports the right number in the wrong sentence."""
+    p = build({"TV": [100.0] * 60 + [0.0] * 30 + [100.0] * 60,
+               "Radio": [80.0] * 60 + [0.0] * 30 + [80.0] * 60})
+    e = event(p, None, 60, 89, event_type="dark_period",
+              detection_confidence=0.9, informativeness=0.6)
+    text = explain(e, p)
+    assert "typical 180 per day to exactly 0 per day" in text
+
+
+def test_deleting_the_dark_period_market_total_sentence_fails_the_test_above():
+    """Not a test of explain() itself -- a sanity check that the assertion
+    above is load-bearing, run inline rather than by hand-editing the source
+    for the report. If the market-level sentence is never produced (e.g. the
+    branch guard is wrong), the phrase must not appear by accident."""
+    p = build({"TV": [100.0] * 60 + [0.0] * 30 + [100.0] * 60,
+               "Radio": [80.0] * 60 + [0.0] * 30 + [80.0] * 60})
+    # A channel-level event (not dark_period) must NOT produce the market
+    # total sentence -- it has its own single-channel sentence instead.
+    e = event(p, "TV", 60, 89, event_type="natural_holdout")
+    text = explain(e, p)
+    assert "typical 180 per day to exactly 0 per day" not in text

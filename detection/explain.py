@@ -19,6 +19,7 @@ defects elsewhere in this codebase.
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 
 from detection.io.panel import Panel
 from detection.model import DetectedEvent
@@ -65,6 +66,51 @@ def _window_level(panel: Panel, country: str | None, channel: str | None,
     if key not in panel.spend.columns:
         return float("nan")
     window = panel.spend.loc[start:end, key]
+    return float(window.mean()) if not window.empty else float("nan")
+
+
+def _market_total(panel: Panel, country: str | None) -> pd.Series | None:
+    """Summed daily spend across every channel this market runs, or None
+    when there is no market to sum (no country, or the country runs no
+    channel at all)."""
+    if country is None:
+        return None
+    channels = panel.channels_in(country)
+    if not channels:
+        return None
+    cols = [(country, ch) for ch in channels]
+    return panel.spend[cols].sum(axis=1)
+
+
+def _typical_market_level(panel: Panel, country: str | None, start, end) -> float:
+    """Median MARKET-TOTAL spend on active days OUTSIDE the window -- the
+    same "median over active days" rule _typical_level uses for one channel,
+    applied to the sum across every channel the market runs.
+
+    A country-level event (dark_period: `event.channel` is always None)
+    has no single channel for _typical_level to read, so without this the
+    explanation's most checkable sentence -- "fell from a typical X to
+    exactly Y" -- was silently dropped for precisely the event type this
+    detector is strongest at. Reading the TOTAL rather than one channel is
+    deliberate: a dark period is a claim about every channel at once, so the
+    number that claim is checked against is the market's whole daily spend,
+    not any single channel's.
+    """
+    total = _market_total(panel, country)
+    if total is None:
+        return float("nan")
+    outside = total.drop(total.loc[start:end].index)
+    active = outside[outside > 0]
+    return float(active.median()) if not active.empty else float("nan")
+
+
+def _window_market_level(panel: Panel, country: str | None, start, end) -> float:
+    """Mean MARKET-TOTAL spend INSIDE the window -- the market-wide
+    counterpart to _window_level."""
+    total = _market_total(panel, country)
+    if total is None:
+        return float("nan")
+    window = total.loc[start:end]
     return float(window.mean()) if not window.empty else float("nan")
 
 
@@ -223,6 +269,34 @@ def explain(event: DetectedEvent, panel: Panel) -> str:
             parts.append(
                 f"Normal spend on {primary} is about {typical:,.0f} per day "
                 f"outside the window.")
+    elif event.channel is None:
+        # A country-level event (dark_period) has no single channel for the
+        # block above to read -- event.channel is always None for one -- so
+        # without this fallback the most checkable sentence in the whole
+        # explanation ("fell from a typical X to exactly Y") was silently
+        # missing for exactly the event type this detector is strongest at.
+        # Reports the MARKET's total daily spend across every channel it
+        # runs, computed the same active-days-median way as the
+        # single-channel sentence above.
+        market_typical = _typical_market_level(panel, event.country_code,
+                                               event.start, event.end)
+        market_window = _window_market_level(panel, event.country_code,
+                                             event.start, event.end)
+        if np.isfinite(market_typical) and np.isfinite(market_window):
+            if market_window <= 0:
+                verb, level_word = "fell", "exactly 0"
+            elif market_window > market_typical:
+                verb, level_word = "rose", f"about {market_window:,.0f}"
+            elif market_window < market_typical:
+                verb, level_word = "fell", f"about {market_window:,.0f}"
+            else:
+                verb, level_word = "moved", f"about {market_window:,.0f}"
+            n_channels = (len(panel.channels_in(event.country_code))
+                         if event.country_code else len(subjects))
+            parts.append(
+                f"Total spend across {n_channels} channels in {where} "
+                f"{verb} from a typical {market_typical:,.0f} per day to "
+                f"{level_word} per day over this window.")
 
     if event.event_type == "step_change":
         if event.magnitude_ratio is None:
