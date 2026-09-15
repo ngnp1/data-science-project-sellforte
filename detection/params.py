@@ -247,3 +247,7 @@ SALES_SNR_SATURATION = 3.0
 # toward the common late-feed case: there is no equivalent common case to lean
 # toward here, so missing sales data must not bias ranking up or down.
 SALES_SNR_UNKNOWN = 0.5
+
+# Calibration bins. Spec section 8 says deciles; fewer bins makes each estimate
+# steadier but the mapping coarser.
+CALIBRATION_BINS = 10
