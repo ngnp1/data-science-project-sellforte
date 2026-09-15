@@ -71,7 +71,7 @@ def test_a_run_touching_the_series_edge_is_excluded_from_the_train():
     assert all(a != s(values).index[0] for a, _ in t.components)
 
 
-def test_a_regular_train_of_six_or_more_windows_is_currently_suppressed():
+def test_a_regular_train_of_six_or_more_windows_produces_no_pulse_train():
     """KNOWN LIMITATION, pinned so it cannot change unnoticed.
 
     P1's intermittent guard and P3's pulse detector are in direct conflict, with
@@ -82,10 +82,23 @@ def test_a_regular_train_of_six_or_more_windows_is_currently_suppressed():
     becomes RUN_RATIO times it. Nothing in a regular train ever clears that:
     five windows work, six produce zero notable runs and no train at all.
 
+    WHAT THIS TEST DOES NOT SAY. It is about P1 and P3 -- `notable_runs` and
+    `find_pulse_trains` -- and nothing more. The pipeline does NOT fall silent
+    on such a train: regime segmentation in detection/compose/label.py cuts the
+    timeline on the active-channel set and never consults P1 notability, so
+    every window is still emitted, as a SEPARATE event OF THE WRONG TYPE.
+    Measured end to end on this fixture's shape: six windows produce six
+    natural_holdout events (or six dark_period events in a one-channel
+    market) and seven produce seven. The production risk is type error and
+    fragmentation, not silence -- see
+    tests/detection/test_pipeline.py::test_a_six_window_train_fragments_
+    into_separate_wrong_type_events, which pins the system-level behaviour
+    this test is often mistaken for.
+
     The more regular and the more numerous the flighting pattern, the more
-    certainly it is discarded -- while spec section 7 calls pulse trains the
-    only place adstock decay is observable and gives them the highest
-    informativeness weight.
+    certainly the GROUPING is discarded -- while spec section 7 calls pulse
+    trains the only place adstock decay is observable and gives them the
+    highest informativeness weight.
 
     The implementation is faithful to spec section 7 P1 as written; the conflict
     is in the spec. It cannot fire on this benchmark, whose pulse family draws
@@ -105,6 +118,9 @@ def test_a_regular_train_of_six_or_more_windows_is_currently_suppressed():
             assert find_pulse_trains(find_off_runs(series)), "expected a train"
         else:
             assert runs == [], (
-                "six regular windows: the ratio rule suppresses every run. "
-                "If this now passes, the spec conflict has been resolved and "
-                "this test should be replaced with the real expectation.")
+                "six regular windows: the ratio rule leaves no run notable, "
+                "so P3 never groups them -- the windows themselves are still "
+                "reported one by one, as the wrong event type, by the "
+                "pipeline. If this now passes, the spec conflict has been "
+                "resolved and this test should be replaced with the real "
+                "expectation.")

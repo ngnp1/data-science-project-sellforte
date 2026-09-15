@@ -120,11 +120,34 @@ def test_a_decaying_excursion_is_rejected_by_persistence():
     assert find_step_episodes(s(values)) == []
 
 
-def test_a_short_excursion_below_persist_is_rejected():
+def test_a_ten_day_excursion_is_rejected_before_it_reaches_persistence():
+    """A brief excursion must yield no step -- but NOT via the gate its old
+    name claimed.
+
+    This test used to be called ...below_persist and to size its excursion
+    `params.PERSIST - 4`, a fixture derived from the parameter it purported to
+    exercise. It never reached that parameter. Measured on this exact series:
+    the largest |z| anywhere is 0.692 against a Z_THRESH of 3.5, so no
+    candidate survives to the persistence block at all, and deleting
+    persistence AND sharpness together leaves this test green. A ten-day
+    excursion simply cannot move a W-day window median far enough -- both
+    comparison windows span the excursion and the centred rolling median
+    flattens what is left.
+
+    Sized with a literal now, and kept for what it does pin: the z gate's
+    insensitivity to an excursion much shorter than its own window. The
+    persistence gate's behavioural pin is
+    test_a_level_that_barely_holds_is_rejected_by_persist_fraction, which is
+    the one that dies when the block is deleted. Same annotation, and same
+    reason, as test_a_decaying_excursion_is_rejected_by_persistence above.
+    """
     rng = np.random.default_rng(5)
-    values = (noisy(100.0, 120, rng) + noisy(300.0, params.PERSIST - 4, rng)
+    values = (noisy(100.0, 120, rng) + noisy(300.0, 10, rng)
               + noisy(100.0, 120, rng))
-    assert find_step_episodes(s(values)) == []
+    series = s(values)
+    assert find_step_episodes(series) == []
+    assert find_level_shifts(series) == [], (
+        "no candidate should even clear the z gate on this shape")
 
 
 def test_a_bounded_step_episode_has_both_ends():
