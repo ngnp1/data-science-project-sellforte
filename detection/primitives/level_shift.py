@@ -14,17 +14,27 @@ Two filters do different jobs, and BOTH are needed:
   into a couple of days, while a ramp spreads it out. Persistence alone does
   NOT reject a ramp, because a ramp's new level genuinely does hold.
 
-Measured on the ramp-length sweep in tests/detection/test_level_shift.py, the
-two gates divide the work by steepness: ramps of ~3-30 days clear both z and
-persistence and are rejected by sharpness alone (measuring 0.17-0.45 against
-the SHARPNESS threshold), while the benchmark's own 50-day ramp never reaches sharpness at
-all -- spreading the rise over 50 days inflates the within-window MAD until no
-candidate clears Z_THRESH (max |z| 2.38). Both shapes correctly yield no step.
+The z's scale is measured on each comparison window separately and never
+across the pair -- see _noise_sigma, which is where the closing shift of a
+bounded step change used to be lost.
 
-Known sensitivity: a 2-day phase-in measures a sharpness a hair under the
-SHARPNESS threshold, so it reads as a ramp rather than a step. Real budget changes
-that phase in over a couple of days are therefore a false-negative risk; see
-the Plan 4 handover.
+Measured on a ramp-length sweep (a 100 -> 300 rise spread over L days, eight
+seeds each), the two gates divide the work by steepness: a rise landing inside
+about five days reads as a step, and a rise spread over seven days or more
+reads as a ramp and yields nothing. Ramps of ~7-20 days clear both z and
+persistence and are rejected by sharpness alone (measuring at most 0.43 against
+the SHARPNESS threshold), while the benchmark's own 50-day blocked ramp never
+reaches sharpness at all -- spreading the rise over 50 days inflates the
+within-window MAD until no candidate clears Z_THRESH (max |z| 3.25). Both
+shapes correctly yield no step.
+
+Known sensitivity: that ramp/step boundary sits at roughly five days and the
+50-day blocked ramp clears the z gate by a thin margin (3.25 against
+Z_THRESH), so a slower phase-in on a quieter series is the shape most likely
+to read as a step when it should not. A phase-in of up to four days now reads
+as a step, which is the intended direction -- a budget decision executed over
+a long weekend is a step -- but it is also where the next false positive would
+come from; see the Plan 4 handover.
 """
 from __future__ import annotations
 
@@ -62,6 +72,42 @@ def _robust_sigma(values: np.ndarray) -> float:
     return max(float(params.MAD_TO_SIGMA * mad), params.SIGMA_FLOOR)
 
 
+def _noise_sigma(before: np.ndarray, after: np.ndarray) -> float:
+    """Noise scale on either side of a candidate, never measured across it.
+
+    The scale in the z must describe the spread the two levels are NOT
+    supposed to have -- the day-to-day noise -- and nothing else. Measuring it
+    on the concatenation of the two windows folds the candidate's own step into
+    the scale it is being divided by, and it does so hardest at the one index
+    where the step is real: there the pooled sample is an even mixture of the
+    two levels, its MAD is about half the delta, and |z| collapses to roughly
+    2 / MAD_TO_SIGMA no matter how large or clean the step is. Move a few days
+    off the true edge and the mixture goes lopsided, the pooled median falls
+    inside the majority level, the MAD drops back to the within-level noise and
+    |z| leaps. The z gate therefore had a notch exactly where a step change
+    sits, while the sharpness gate has its peak there -- the two gates were
+    maximised at different indices and a genuine step passed both only when
+    noise happened to leave one index in the overlap.
+
+    Taking the LARGER of the two one-sided scales removes the notch. `max` is
+    the conservative combiner of the two: it cannot come out below the noise on
+    either side, and it keeps a quiet window from lending its quiet to a noisy
+    neighbour. What it deliberately no longer absorbs is the DIFFERENCE between
+    the two window medians. Where the two windows sit at the same level that
+    difference is only sampling noise and the two forms are close; where they
+    sit at different levels it is the step itself, which is what the z is meant
+    to be measuring rather than dividing by.
+
+    Not absorbing it does raise |z| generally, so the precision cost is
+    measured rather than argued: a battery of series with no level change --
+    Gaussian noise at two scales and strong day-of-week seasonality, forty
+    seeds each -- yields no shift at all (tests/detection/test_level_shift.py),
+    the ramp and spike defences are unmoved, and the development split's
+    null-scenario false-positive rate stayed at zero.
+    """
+    return max(_robust_sigma(before), _robust_sigma(after))
+
+
 def find_level_shifts(s: pd.Series) -> list[LevelShift]:
     level = active_level(s)
     if not np.isfinite(level) or level <= 0 or len(s) < 2 * params.W + 1:
@@ -76,7 +122,7 @@ def find_level_shifts(s: pd.Series) -> list[LevelShift]:
     for t in range(params.W, n - params.W):
         before, after = y[t - params.W:t], y[t:t + params.W]
         delta = float(np.median(after) - np.median(before))
-        sigma = _robust_sigma(np.concatenate([before, after]))
+        sigma = _noise_sigma(before, after)
         z = delta / sigma
         if abs(z) < params.Z_THRESH:
             continue
@@ -144,12 +190,28 @@ def find_step_episodes(
     that comes back at three times its old budget shows that here, and it is the
     only shift that can open the step that follows.
     """
+    # A shift's date is resolved only to within the centred rolling median's
+    # half-width: y[t] is a median over ROLLING days centred on t, so a shift
+    # sitting on the edge of an off-window can be dated a few days either side
+    # of the first or last off day.
+    smear = pd.Timedelta(days=params.ROLLING // 2)
     shifts = find_level_shifts(s)
     if exclude:
+        # Widen only the LEADING edge. The drop INTO an off-window can be dated
+        # before the first off day and so fall outside the window that is meant
+        # to exclude it; when it does it survives to claim the rise out as its
+        # reversal and the step that follows is destroyed -- the exact failure
+        # the exclusion exists to prevent. The rise out sits at the trailing
+        # edge and must survive untouched.
         shifts = [sh for sh in shifts
-                  if not any(lo <= sh.at < hi for lo, hi in exclude)]
+                  if not any(lo - smear <= sh.at < hi for lo, hi in exclude)]
     if not shifts:
         return []
+
+    # Trailing edges of the excluded windows that a channel can come BACK from:
+    # a window that abuts the start of the series is a channel that had not
+    # launched yet, not one that paused. See `restarted_out_of_a_pause` below.
+    pause_ends = [hi for lo, hi in (exclude or []) if lo > s.index[0]]
 
     episodes: list[StepEpisode] = []
     used: set[int] = set()
@@ -170,7 +232,20 @@ def find_step_episodes(
             # Its magnitude is already reported as None for the same reason
             # (there is no finite ratio out of zero), so pair it on direction
             # alone and let the closing shift supply the extent.
-            comparable = (up.ratio is None
+            #
+            # That waiver is for that shape ALONE. Granted to every rise out of
+            # zero it also let an ordinary channel LAUNCH pair with the next
+            # opposite shift whatever its size -- a cut ten months later, four
+            # times outside the band -- and report the whole span as one step
+            # change. A launch is not a step out of a previous level, because
+            # there is no previous level for a later shift to be a reversal of;
+            # a channel that PAUSED does have one, which is why the waiver is
+            # scoped to a restart out of an interior off-window this call was
+            # asked to exclude.
+            restarted_out_of_a_pause = (
+                up.ratio is None
+                and any(hi <= up.at <= hi + smear for hi in pause_ends))
+            comparable = (restarted_out_of_a_pause
                           or 1 / band <= abs(other.delta / up.delta) <= band)
             if np.sign(other.delta) != np.sign(up.delta) and comparable:
                 partner = j
