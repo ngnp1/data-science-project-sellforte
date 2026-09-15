@@ -899,6 +899,14 @@ of recommendation 10(c).
 it asks only whether this market's turnover is quiet enough for *any* response to be readable
 — a noise measurement — never whether the spend change caused a sales change.)
 
+### The missing-rows trigger excludes step changes deliberately
+
+The validity gate's missing-rows trigger fires only when absent rows — rather than zero-spend rows — are detected. This trigger is deliberately restricted to stopping types (`dark_period`, `single_channel`, `natural_holdout`, `channel_pulse`, and `staggered_launch`). It does **not** fire for `step_change` events, even when rows are missing during a step window.
+
+This is a deliberate scope decision, not an oversight. Extending the trigger to step changes was considered and declined in the final fix wave because: (1) the validity gate had just completed a narrowing pass to reduce over-reporting (see above), and widening it again would reverse that scope correction; (2) before deploying an extended gate to production, the wider scope would need its own measurement on the development split plus its own disclosure of what it catches and misses — it cannot ride on the validation of the narrower form.
+
+The exclusion remains **an open question for production.** In a real export, rows can be omitted during a step-change window with exactly the same frequency as during any other channel state — a step change is when spend moves to a new level, not when it continues normally, but if the exporting system has a defect it has a defect regardless. A detector receiving the export cannot tell the two apart: a missing-row pattern during a step window looks the same as one during any other event. Whether the trigger should fire there is a policy question, not a technical one, and it should be revisited when this detector moves to real data.
+
 ### The validity gate fires only on correct events, and catches none of the errors
 
 Measured across all 45 dev scenarios — the only data where the gate can be checked at all,
