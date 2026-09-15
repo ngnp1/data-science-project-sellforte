@@ -79,10 +79,12 @@ def build_panel(media_df: pd.DataFrame, sales_df: pd.DataFrame | None = None,
     # Presence is counted BEFORE any fill, so a row that existed with spend 0.0
     # is distinguishable from a row that never existed at all.
     #
-    # pivot_table(..., aggfunc="size") silently drops the country_code level
-    # from the result columns when there is only one distinct value in a
-    # level (observed on the pandas version pinned for this project) --
-    # unlike aggfunc="sum", which always preserves the full MultiIndex.
+    # pivot_table(..., aggfunc="size") with a scalar `values=` silently drops
+    # a level from the result columns -- UNCONDITIONALLY on the pandas version
+    # pinned for this project, not only when a level has one distinct value, as
+    # an earlier version of this comment claimed. The repro that found it
+    # crashes outright on a multi-country panel. aggfunc="sum" always preserves
+    # the full MultiIndex.
     # groupby(...).size().unstack(...) does not have that failure mode, so
     # presence is counted that way instead.
     present = (media.groupby(["date", "country_code", "advertising_channel"])
