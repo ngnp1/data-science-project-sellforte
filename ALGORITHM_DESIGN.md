@@ -42,132 +42,27 @@ Several examples print a series as one character per day:
    (`detection/compose/label.py`).
 7. **The cross-market layer** asks the peer markets what they did
    (`detection/compose/cross_market.py`).
-8. **Scoring** produces confidence and informativeness (`detection/score.py`).
-9. **The validity gate** flags the two data faults that imitate real events
-   (`detection/validity.py`).
-10. **Calibration** maps a raw confidence onto a measured precision
-    (`detection/calibrate.py`).
 
 ---
 
-## 1. Preprocessing: the active level and the scale-free series
+## Shared inputs
 
-### What it does and why
+Two definitions from preprocessing apply to every section below
+(`detection/io/normalize.py`).
 
-Raw euros cannot be compared across markets. The benchmark panel spans a 15x range between
-its largest and smallest market. A threshold tuned on Germany means nothing in Finland.
+- The **active level** `L` is the median spend over the days a channel actually ran.
+- The **scale-free series** is `y = log1p(spend / L)`.
 
-Preprocessing removes market size in three steps:
+Dividing by `L` removes market size. The benchmark panel spans a 15x range between its
+largest and smallest market. A log ratio keeps one noise threshold correct across that
+whole range.
 
-1. The **active level** `L` is the median spend over the days the channel actually ran. The
-   median ignores the off-days, so a long holdout cannot drag the baseline down and hide
-   itself.
-2. The **scale-free series** is `y = log1p(spend / L)`. Dividing by `L` removes market size.
-   The log turns multiplicative spend noise into additive noise, so one noise threshold works
-   at every scale.
-3. A **7-day centred rolling median** removes day-of-week structure. It takes the median
-   rather than the mean, because a single spike cannot move a median.
-
-Run detection stays on raw daily values, so event boundaries land on exact dates. Only P2's
-level work reads the smoothed series.
-
-### The code
-
-```python
-from detection.io.normalize import active_level, scale_free
-from detection import params
-
-L = active_level(s)                    # median of s[s > 0]
-y = scale_free(s)                      # np.log1p(s / L)
-m = y.rolling(params.ROLLING, center=True, min_periods=1).median()
-```
-
-### The dataset
-
-Two markets, one channel, 14 days. The small market spends about 1/15 of the large one. Both
-stop on 8 and 9 January. Both spend triple on 11 January.
-
-```
-day  big     small
-2024-01-01     1000      66
-2024-01-02     1100      73
-2024-01-03      900      60
-2024-01-04     1050      70
-2024-01-05      950      63
-2024-01-06     1000      66
-2024-01-07     1050      70
-2024-01-08        0       0
-2024-01-09        0       0
-2024-01-10     1000      66
-2024-01-11     3000     200
-2024-01-12     1000      66
-2024-01-13      950      63
-2024-01-14     1000      66
-```
-
-### The walk through
-
-1. `active_level` takes the 12 positive days of each series and returns the median.
-2. The two levels differ by a factor of 15.15.
-3. `scale_free` divides each series by its own level and applies `log1p`.
-4. The two `y` series now agree to within 0.008 on every day.
-5. The rolling median replaces each day with the median of the 7 days centred on it.
-
-### The output
-
-```
-active_level(big)   = 1000.0
-active_level(small) = 66.0
-ratio of levels     = 15.151515151515152
-
-day         y_big     y_small   difference
-2024-01-01    0.6931    0.6931  +0.0000
-2024-01-02    0.7419    0.7448  -0.0029
-2024-01-03    0.6419    0.6466  -0.0048
-2024-01-04    0.7178    0.7230  -0.0052
-2024-01-05    0.6678    0.6702  -0.0023
-2024-01-06    0.6931    0.6931  +0.0000
-2024-01-07    0.7178    0.7230  -0.0052
-2024-01-08    0.0000    0.0000  +0.0000
-2024-01-09    0.0000    0.0000  +0.0000
-2024-01-10    0.6931    0.6931  +0.0000
-2024-01-11    1.3863    1.3938  -0.0075
-2024-01-12    0.6931    0.6931  +0.0000
-2024-01-13    0.6678    0.6702  -0.0023
-2024-01-14    0.6931    0.6931  +0.0000
-```
-
-The 15.15x size difference became a maximum difference of 0.0075. That is what scale-free
-means in practice. A threshold set on one of these series is correct on the other.
-
-Now the rolling median:
-
-```
-day         y_big   rolling7_median
-2024-01-01   0.6931   0.7055
-2024-01-02   0.7419   0.6931
-2024-01-03   0.6419   0.6931
-2024-01-04   0.7178   0.6931
-2024-01-05   0.6678   0.6931
-2024-01-06   0.6931   0.6678
-2024-01-07   0.7178   0.6931
-2024-01-08   0.0000   0.6931
-2024-01-09   0.0000   0.6931
-2024-01-10   0.6931   0.6931
-2024-01-11   1.3863   0.6931
-2024-01-12   0.6931   0.6931
-2024-01-13   0.6678   0.6931
-2024-01-14   0.6931   0.6931
-```
-
-Read the three rows for 8, 9 and 11 January. The two zero days and the triple-spend day all
-smooth to 0.6931. Two off-days out of seven cannot move a median. That is the property P2
-depends on, because it means a short excursion cannot move a window median far enough to
-look like a new level.
+P2 reads a **7-day centred rolling median** of `y` for its level comparisons. P1 reads the
+raw daily series instead, so each run starts and ends on an exact date.
 
 ---
 
-## 2. P1, off-runs
+## 1. P1, off-runs
 
 ### What it does and why
 
@@ -269,12 +164,12 @@ Three other fields come out of the run:
 
 ---
 
-## 3. P2, level shifts
+## 2. P2, level shifts
 
 ### What it does and why
 
 P2 finds the days where a channel's spend level changed and stayed changed. It works on the
-smoothed scale-free series `y` from section 1.
+smoothed scale-free series `y` defined in Shared inputs.
 
 At each candidate day `t` it compares a 21-day window before `t` against a 21-day window from
 `t`. It takes the median of each window, subtracts them, and divides by a noise scale built from
@@ -418,7 +313,7 @@ held together by a rule that must be relaxed for production".
 
 ---
 
-## 4. P3, pulse grouping
+## 3. P3, pulse grouping
 
 ### What it does and why
 
@@ -476,7 +371,7 @@ three times.
 ```
 
 The train spans 44 days. Only 24 of those are off-days. The other 20 are active days between
-pulses. That matters later, in section 9.
+pulses. REPORT.md section 11 explains why the validity gate treats them separately.
 
 ### The shape check, on two runs of different length
 
@@ -516,7 +411,7 @@ fragmented".
 
 ---
 
-## 5. P4, onsets
+## 4. P4, onsets
 
 ### What it does and why
 
@@ -526,7 +421,7 @@ An off-run that touches the end is a discontinuation. Both must be at least `MIN
 A dormant start is a **candidate** only. It becomes a `staggered_launch` event when the
 cross-market layer finds that the channel was already live in another market during the
 dormancy. On its own it is a censored holdout, and naming it a `staggered_launch` without
-peers would be a guess. Section 7 finishes the job.
+peers would be a guess. Section 6 finishes the job.
 
 ### The code
 
@@ -574,7 +469,7 @@ was live from the first day has no onset to report.
 
 ---
 
-## 6. Regime composition
+## 5. Regime composition
 
 ### What it does and why
 
@@ -687,7 +582,7 @@ not call it a holdout. P4 and the cross-market layer own it instead.
 ### The step_change branch
 
 The 70-day panel above produces no step episode. Here is the same composer on a one-market
-one-channel panel that carries the P2 series from section 3:
+one-channel panel that carries the P2 series from section 2:
 
 ```
 label_market on a one-channel market carrying the P2 step series:
@@ -699,7 +594,7 @@ bounded rather than open-ended.
 
 ---
 
-## 7. The cross-market layer
+## 6. The cross-market layer
 
 ### What it does and why
 
@@ -748,7 +643,7 @@ events.extend(find_staggered_launches(panel, sid))
 
 ### The dataset
 
-The same two-market panel from section 6.
+The same two-market panel from section 5.
 
 ### The walk through
 
@@ -800,346 +695,11 @@ gets the event.
 
 ---
 
-## 8. Scoring
-
-### What it does and why
-
-Two numbers come out of this module, and they answer different questions.
-
-- **`detection_confidence`** answers "how sure am I this happened?"
-- **`informativeness`** answers "how useful is this to an analyst?"
-
-A genuine global pause scores high on the first and low on the second. Collapsing the two is
-the standard mistake.
-
-Confidence is a weighted mean of six sub-scores, each in the range 0 to 1:
-
-1. **magnitude_evidence.** How far spend fell, or for a step change `abs(z) / Z_SATURATION`.
-2. **duration_evidence.** Event length against `DURATION_SATURATION_MULT * MIN_DAYS`, which
-   is 14 days.
-3. **distinctiveness.** This run's length against the p90 of the series' **other** off-runs,
-   divided by `DISTINCTIVENESS_SATURATION`.
-4. **edge_sharpness.** How cleanly spend stopped and restarted.
-5. **corroboration.** Did impressions stop when spend did? Impressions still flowing scores
-   `CORROBORATION_CONTRADICTED`, which is 0.2.
-6. **consistency.** For a country-level event, the fraction of claimed channels that actually
-   went off. A channel-level event claims nothing about its neighbours and scores 1.0.
-
-The weights differ per event type, because the evidence differs. A dark period claims that
-every channel stopped together, so consistency carries weight 0.25 there. A step change makes
-no claim about its neighbours, so consistency carries weight 0.0.
-
-Informativeness is a weighted mean of six drivers:
-
-1. **duration_adequacy.** Can this window show adstock decay at all? It saturates at
-   `ADSTOCK_HALF_LIFE * ADSTOCK_WINDOWS_FOR_FULL_CREDIT`, which is 28 days.
-2. **contrast.** How far the window departs from the series' normal level.
-3. **cleanliness.** `CONFOUNDED_PENALTY` when another event overlaps, otherwise 1.0.
-4. **control_availability.** The answer section 7 worked out. `peers` scores 1.0,
-   `sibling_channels` 0.7, `none` 0.3.
-5. **sales_snr.** How readable a sales response would be against this market's own turnover
-   noise. It is a noise measurement and not a causal claim.
-6. **type_prior.** A per-type constant. `dark_period` scores 1.0 and `step_change` 0.45.
-
-A censored event is then multiplied by `CENSORING_PENALTY`.
-
-### The code
-
-```python
-from detection.score import sub_scores, confidence, informativeness
-
-parts = sub_scores(event, panel)
-conf, parts = confidence(event, panel)
-info, drivers = informativeness(event, panel)
-```
-
-### The dataset
-
-The same two-market panel from section 6, after the cross-market layer ran.
-
-### The walk through
-
-Take the DE `natural_holdout`. `_select_run` first finds which off-run the run-derived
-sub-scores read from, and which channel it came from:
-
-```
-Event under the microscope:
-  DE natural_holdout 2024-02-26..2024-03-05 channel=Search n_days=9
-  subject_channels = ['Search']
-  _select_run -> channel=Search run=2024-02-26..2024-03-05 n_days=9 depth=1.0 edge_sharpness=1.0
-```
-
-`_select_run` returns the channel alongside the run on purpose. A run without its provenance
-is exactly what let one channel's run get compared against a different channel's gap history.
-
-### The output: confidence
-
-```
-sub-score            value   weight   product
-magnitude_evidence   1.0000  0.25     0.2500
-duration_evidence    0.6429  0.20     0.1286
-distinctiveness      0.3000  0.25     0.0750
-edge_sharpness       1.0000  0.10     0.1000
-corroboration        1.0000  0.20     0.2000
-consistency          1.0000  0.00     0.0000
-confidence           0.7536
-```
-
-Check two of the rows by hand:
-
-- `duration_evidence` is `9 / 14 = 0.6429`.
-- `distinctiveness` is `9 / 10 / 3 = 0.3000`. The only other off-run on DE/Search is the
-  10-day dark period, so the p90 of the others is 10. This stop is shorter than the channel's
-  one previous stop, so it is not distinctive.
-
-### The output: informativeness
-
-```
-driver               value   weight   product
-duration_adequacy    0.3214  0.25     0.0804
-contrast             1.0000  0.15     0.1500
-cleanliness          1.0000  0.15     0.1500
-control_availability 1.0000  0.20     0.2000
-sales_snr            0.0749  0.15     0.0112
-type_prior           0.7500  0.10     0.0750
-informativeness      0.6666
-```
-
-`duration_adequacy` is `9 / 28 = 0.3214`. Nine days cannot show four adstock half-lives.
-`control_availability` is 1.0, because section 7 found FR/Search running throughout.
-`sales_snr` is 0.0749, because the synthetic turnover in this panel barely moves during the
-window.
-
-### The output: every event in the panel
-
-```
-Every event in the mini panel, scored:
-  DE dark_period      2024-01-01..2024-01-10 confidence=0.8627 informativeness=0.6243
-  DE single_channel   2024-01-31..2024-02-11 confidence=0.8286 informativeness=0.7721
-  DE natural_holdout  2024-02-26..2024-03-05 confidence=0.7536 informativeness=0.6666
-  FR dark_period      2024-01-01..2024-01-10 confidence=0.9571 informativeness=0.6243
-  FR staggered_launch 2024-01-01..2024-01-30 confidence=1.0000 informativeness=0.7450
-```
-
-The two dark periods cover the same ten days and score differently. Printing their six
-sub-scores shows where the difference sits:
-
-```
-DE {'magnitude_evidence': 1.0, 'duration_evidence': 0.7143, 'distinctiveness': 0.3704, 'edge_sharpness': 1.0, 'corroboration': 1.0, 'consistency': 1.0}
-FR {'magnitude_evidence': 1.0, 'duration_evidence': 0.7143, 'distinctiveness': 1.0, 'edge_sharpness': 1.0, 'corroboration': 1.0, 'consistency': 1.0}
-```
-
-Only `distinctiveness` differs. DE/Search has a second off-run of 9 days, so its p90 is 9 and
-the 10-day dark period scores 0.3704. FR/Search has no other off-run, so it scores 1.0. The
-gap of 0.6296 at weight 0.15 is 0.0944, which is the gap between 0.8627 and 0.9571.
-
-**Known limitation.** Raw confidence separates by event type rather than by correctness, and
-on the development split it is mildly anti-correlated with correctness. See REPORT.md
-section 4, "Why it collapsed".
-
----
-
-## 9. The validity gate
-
-### What it does and why
-
-Two real-data faults produce exactly the shape of a genuine event:
-
-1. An export that omits rows instead of writing zeros looks like a perfect holdout.
-2. A tracking pixel that keeps firing after spend stops looks like a pause that did not
-   happen.
-
-Neither can be settled from spend alone. The gate therefore **reports suspicion and never
-filters**. It annotates an event and never drops one. A detector that silently dropped these
-would hide the largest real-data risk instead of showing it.
-
-The gate implements three triggers:
-
-1. **`suspect_data_gap`, missing rows.** Any day inside the event window where the export
-   carried no row for a subject channel. This trigger reads the whole span, because "this day
-   has no rows" is true whatever the channel was doing.
-2. **`suspect_tracking_loss`.** Impressions land on days that the event reports as off, and
-   the channel reports impressions outside the window too. Both halves are per-day, and the
-   test needs the intersection. A window that merely mixes off and on days satisfies an
-   existential "some day was off" plus a total "the window has impressions".
-3. **`suspect_data_gap`, panel-wide.** Every channel in every market is off at once. That is
-   far more likely a feed outage than a coordinated global pause.
-
-The second trigger reads `_claimed_mask`, which is the days the event actually reports as
-off. A pulse train spans first start to last end, so its interval also covers the active days
-between its windows. Reading the span instead of the components is what once made the trigger
-print "spend is zero but impressions continue" about a pulsing channel whose off-days carried
-exactly zero impressions.
-
-Spec section 8 names a fourth trigger that is not implemented. See REPORT.md section 11,
-"Spec section 8's fourth validity trigger is not implemented".
-
-### The code
-
-```python
-from detection.validity import assess
-
-verdict, reasons = assess(event, panel)     # "ok" | "suspect_data_gap" | "suspect_tracking_loss"
-```
-
-### The dataset
-
-The same two-market panel again. It carries all three faults on purpose.
-
-```
-present rows for DE/Search, days 54..66:
-  [True, True, False, False, False, False, False, True, True, True, True, True, True]
-impressions for DE/Social, days 28..44:
-  [80000, 80000, 50000, 50000, 50000, 50000, 50000, 50000, 50000, 50000, 50000, 50000, 50000, 50000, 80000, 80000, 80000]
-spend for DE/Social, days 28..44:
-  [800, 800, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 800, 800, 800]
-```
-
-### The walk through
-
-1. DE/Search has no rows at all on days 56 to 60. That is the missing-rows trigger.
-2. DE/Social spends zero on days 30 to 41 but reports 50000 impressions on each of them. That
-   is the tracking-loss trigger.
-3. Every channel in both markets is off on days 0 to 9. That is the panel-wide trigger.
-
-### The output
-
-```
-DE dark_period 2024-01-01..2024-01-10 -> suspect_data_gap
-    - every channel in every market is off simultaneously -- far more likely a feed outage than a coordinated global pause
-DE single_channel 2024-01-31..2024-02-11 -> suspect_tracking_loss
-    - Social: spend is zero on the days this event reports as off but impressions continue on those same days -- this may be tracking loss rather than a pause
-DE natural_holdout 2024-02-26..2024-03-05 -> suspect_data_gap
-    - Search: 5 of 9 days in the window are missing rows rather than zero-spend rows -- the export may be omitting rows rather than reporting a real stop
-FR dark_period 2024-01-01..2024-01-10 -> suspect_data_gap
-    - every channel in every market is off simultaneously -- far more likely a feed outage than a coordinated global pause
-FR staggered_launch 2024-01-01..2024-01-30 -> ok
-```
-
-Each reason names the channel and the count. The wording of the tracking-loss sentence comes
-from `OffRun.kind`. A near-zero run gets a different sentence, because impressions tracking
-residual spend is ordinary rather than suspicious.
-
-**Known limitation.** On the development split the gate flagged 7 of 70 detections, and all 7
-were correct detections. It caught none of the 4 false positives. You cannot use a gate that
-fires only on correct events as a filter. See REPORT.md section 11, "The validity gate fires
-only on correct events, and catches none of the errors".
-
----
-
-## 10. Calibration
-
-### What it does and why
-
-A raw confidence of 0.85 is an assertion until somebody measures it. Calibration turns it
-into a testable claim: events at confidence 0.85 are correct about 85% of the time on data
-the detector never saw.
-
-The method is isotonic regression by **pool adjacent violators**, written out in a short loop
-rather than taken from a library. The steps are:
-
-1. Bin every score into `n_bins` equal-width buckets covering 0 to 1.
-2. Measure each bucket's empirical rate, which is the fraction of correct detections in it.
-3. Walk the buckets left to right. Whenever a bucket's rate is lower than its left
-   neighbour's, that pair is an inversion.
-4. Merge an inverted pair into one block that carries their combined weight and count.
-5. Re-check the merged block against its new left neighbour, because one merge can cascade.
-
-What remains is the closest non-decreasing fit to the measured rates. Empty buckets are
-skipped.
-
-The fit runs on the development split only. Refitting against the sealed test split would
-score the detector against its own answer key.
-
-### The code
-
-```python
-from detection.calibrate import fit_pav, apply_calibration
-
-knots = fit_pav(scores, correct, n_bins=5)   # [(bin_upper_edge, calibrated_value), ...]
-value = apply_calibration(0.45, knots)
-```
-
-### The dataset
-
-17 events in 5 bins. Each row gives the bin, the score every event in it carries, the count,
-and how many of them were correct.
-
-```
-bin upper  score  n  correct  raw rate
-   0.2      0.05  3     1    0.3333
-   0.4      0.25  4     3    0.7500
-   0.6      0.45  4     2    0.5000
-   0.8      0.65  2     2    1.0000
-   1.0      0.85  4     2    0.5000
-```
-
-### The walk through
-
-1. Push bin 1, rate 0.3333. Nothing to compare.
-2. Push bin 2, rate 0.7500. 0.3333 is not greater, so no merge.
-3. Push bin 3, rate 0.5000. 0.7500 is greater, so merge bins 2 and 3. The merged block has
-   weight 8 and 5 correct, which is a rate of 0.6250. Re-check against bin 1. 0.3333 is not
-   greater, so the cascade stops.
-4. Push bin 4, rate 1.0000. 0.6250 is not greater, so no merge.
-5. Push bin 5, rate 0.5000. 1.0000 is greater, so merge bins 4 and 5. The merged block has
-   weight 6 and 4 correct, which is a rate of 0.6667. Re-check against the 0.6250 block.
-   0.6250 is not greater, so the cascade stops.
-
-Three blocks remain. Each keeps the upper edge of its rightmost bin.
-
-### The output
-
-```
-fit_pav(scores, correct, n_bins=5) =
-   (0.2, 0.3333333333333333)
-   (0.6000000000000001, 0.625)
-   (1.0, 0.6666666666666666)
-
-  apply_calibration(0.05, knots) = 0.333333
-  apply_calibration(0.25, knots) = 0.625000
-  apply_calibration(0.45, knots) = 0.625000
-  apply_calibration(0.65, knots) = 0.666667
-  apply_calibration(0.85, knots) = 0.666667
-  apply_calibration(1.00, knots) = 0.666667
-```
-
-`apply_calibration` walks the knots and returns the value of the first one whose upper edge
-the score does not exceed. Scores 0.25 and 0.45 fell in merged bins, so both now read 0.625.
-The mapping is non-decreasing by construction.
-
-### What happened on the real development split
-
-The shipped fit used the four populated bins of the development split. Feeding those four
-bins back through `fit_pav` reproduces the shipped file exactly:
-
-```
-The shipped fit, from the development split's own four bins:
-  mean raw 0.644  n=13  correct=13  rate=1.0000
-  mean raw 0.721  n= 8  correct= 8  rate=1.0000
-  mean raw 0.822  n= 5  correct= 5  rate=1.0000
-  mean raw 0.998  n=44  correct=40  rate=0.9091
-  fit_pav(..., n_bins=10) = [(1.0, 0.9428571428571428)]
-  detection/calibration_fit.py ships:
-  KNOTS = [(1.0, 0.9428571428571428)]
-  match: True
-```
-
-The most confident bin was the least precise. PAV's job is to enforce a non-decreasing fit,
-so an inversion at the top forced a leftward cascade that swallowed the whole range. All 70
-detections pooled into one block, and 66 of 70 is 0.9428571428571428.
-
-**Known limitation.** The calibration collapsed to a constant. Every event the detector emits
-carries `detection_confidence = 0.943`, always. The claim is honest, and the test split
-measured 0.978. But confidence cannot rank events and cannot gate them, so there is no
-operating point to choose. See REPORT.md section 4, "The calibrated confidence is a constant".
-
----
-
 ## Where to read more
 
 - [REPORT.md](REPORT.md) section 2 covers the final design per event type, with test scores.
 - [REPORT.md](REPORT.md) section 5 covers parameter sensitivity.
 - [REPORT.md](REPORT.md) section 8 covers production readiness per detector.
 - [REPORT.md](REPORT.md) section 11 covers what this benchmark cannot tell you.
+- [REPORT.md](REPORT.md) section 4 covers scoring and calibration.
 - `detection/params.py` holds every threshold, with the failure mode of getting it wrong.
