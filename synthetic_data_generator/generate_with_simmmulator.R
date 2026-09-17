@@ -6,25 +6,51 @@
 # Output (raw, wide, per-country) is written to raw_daily_wide.csv and then reshaped
 # into media.csv / sales.csv / ground_truth.csv by reformat.py (Python).
 #
-# Usage: Rscript generate_with_simmmulator.R
+# Usage: Rscript generate_with_simmmulator.R \
+#            [--seed N] [--config CONFIG] [--events EVENTS] [--outdir DIR]
+#
+#   --seed    integer RNG seed                      (default 42)
+#   --config  path to the simulation config         (default config.yaml)
+#   --events  path to the injected-pattern config   (default events_config.yaml)
+#   --outdir  directory for raw_daily_wide.csv      (default .)
+#
+# All four are optional and the defaults reproduce the original behaviour
+# exactly, so a bare `Rscript generate_with_simmmulator.R` is unchanged.
+# Parsing lives in cli_args.R so it can be tested without a simulation.
 
 library(siMMMulator)
 library(dplyr)
 library(yaml)
 
-set.seed(42)
+# Resolve this script's own directory so cli_args.R can be sourced and the
+# script can be invoked from any working directory.
+.this_file <- sub("^--file=", "",
+                  grep("^--file=", commandArgs(FALSE), value = TRUE)[1])
+.script_dir <- if (is.na(.this_file)) "." else dirname(normalizePath(.this_file))
+source(file.path(.script_dir, "cli_args.R"))
+
+opts <- parse_cli_args(commandArgs(trailingOnly = TRUE))
+
+set.seed(opts$seed)
 
 # ---------------------------------------------------------------------------
 # Config -- everything simulation-wide lives in config.yaml, informative
 # periods live in events_config.yaml. See DETAILS.md for the full reference.
 # ---------------------------------------------------------------------------
-config <- yaml::read_yaml("config.yaml")
-events <- yaml::read_yaml("events_config.yaml")
+config <- yaml::read_yaml(opts$config)
+events <- yaml::read_yaml(opts$events)
 
 # yaml parses whole numbers (2, 40, 15000, ...) as R integers, but siMMMulator's
 # input checks require type "double" -- as.numeric() everything pulled from yaml.
 num <- function(x) as.numeric(x)
-field <- function(ch, name, default = NA) if (is.null(ch[[name]])) default else num(ch[[name]])
+# default is NA_real_ (not NA) so that TRUE_CPM/TRUE_CPC stay type "double"
+# even in a homogeneous-channel scenario where every element hits the
+# default (e.g. an all-click channel set has no true_cpm anywhere): sapply
+# over a list of all-logical-NA scalars simplifies to a logical vector, and
+# siMMMulator's step_3_generate_media requires is.double(true_cpm). In the
+# mixed-type case this was already a no-op -- at least one real numeric
+# value forced the same promotion during simplification either way.
+field <- function(ch, name, default = NA_real_) if (is.null(ch[[name]])) default else num(ch[[name]])
 
 YEARS <- num(config$years)
 START_DATE <- config$start_date
@@ -45,8 +71,16 @@ impression_channels <- Filter(function(ch) ch$type == "impression", config$chann
 click_channels <- Filter(function(ch) ch$type == "click", config$channels)
 channels_ordered <- c(impression_channels, click_channels)
 
-CHANNELS_IMPRESSIONS <- sapply(impression_channels, function(ch) ch$name)
-CHANNELS_CLICKS <- sapply(click_channels, function(ch) ch$name)
+# vapply (not sapply) so that a scenario with channels of only one type
+# yields a genuine character(0) on the other side instead of sapply's
+# list() on empty input -- c() on character + list coerces the whole
+# result to a list, which corrupts the `channel` column many steps later.
+# siMMMulator's step_3_generate_media explicitly supports a zero-length
+# channels_impressions or channels_clicks (see its
+# `if (length(channels_impressions) == 0)` guard), so a real character(0)
+# is exactly what it expects.
+CHANNELS_IMPRESSIONS <- vapply(impression_channels, function(ch) ch$name, character(1))
+CHANNELS_CLICKS <- vapply(click_channels, function(ch) ch$name, character(1))
 CHANNELS <- c(CHANNELS_IMPRESSIONS, CHANNELS_CLICKS)
 
 PLATFORM_OF <- setNames(sapply(channels_ordered, function(ch) ch$platform), CHANNELS)
@@ -184,7 +218,9 @@ run_country <- function(country) {
 
 all_countries_df <- bind_rows(lapply(COUNTRIES, run_country))
 
-write.csv(all_countries_df, "raw_daily_wide.csv", row.names = FALSE)
+dir.create(opts$outdir, showWarnings = FALSE, recursive = TRUE)
+raw_path <- file.path(opts$outdir, "raw_daily_wide.csv")
+write.csv(all_countries_df, raw_path, row.names = FALSE)
 
-cat("\nDone. Wrote raw_daily_wide.csv (", nrow(all_countries_df), "rows ).\n")
+cat("\nDone. Wrote", raw_path, "(", nrow(all_countries_df), "rows ).\n")
 cat("Next: run `python reformat.py` to produce media.csv / sales.csv / ground_truth.csv\n")

@@ -222,3 +222,22 @@ synthetic_data_generator/.venv/
 synthetic_data_generator/raw_daily_wide.csv
 __pycache__/
 *.pyc
+
+# JetBrains
+.idea/
+
+# Benchmark datasets: large and regenerable from benchmark/spec/ (generation is
+# deterministic, so spec_hash fully describes them). The seal marker and the
+# SHA-256 manifests ARE committed, so the frozen test split stays provable.
+benchmark/datasets/*/*/media.csv
+benchmark/datasets/*/*/sales.csv
+benchmark/datasets/*/*/ground_truth.csv
+benchmark/datasets/*/*/meta.json
+benchmark/datasets/*/*/scenario.json
+benchmark/datasets/*/*/true_roi.csv
+
+# SDD scratch workspace
+.superpowers/
+
+# Design spec and implementation plans: kept local until publication
+docs/superpowers/

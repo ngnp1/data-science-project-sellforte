@@ -8,10 +8,21 @@ from config.yaml, the same file generate_with_simmmulator.R reads -- one
 source of truth for both languages.
 
 Usage:
-    python reformat.py
+    python reformat.py [--config CONFIG] [--events EVENTS] [--outdir DIR]
+
+    --config  path to the simulation config        (default: config.yaml)
+    --events  path to the injected-pattern config  (default: events_config.yaml)
+    --outdir  directory holding raw_daily_wide.csv, and where media.csv,
+              sales.csv, ground_truth.csv and true_roi.csv are written
+              (default: .)
+
+The defaults reproduce the original behaviour exactly, so a bare
+`python reformat.py` in the generator directory is unchanged.
 """
 
+import argparse
 import hashlib
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -102,16 +113,40 @@ def build_ground_truth(events, dates_by_country):
             "multiplier": ev["multiplier"] if ev["pattern_type"] == "step_change" else "",
             "description": ev["description"],
         })
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=[
+        "pattern_id", "pattern_type", "country_code", "channel",
+        "start_date", "end_date", "multiplier", "description",
+    ])
+
+
+def parse_args():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--config", default="config.yaml",
+                   help="path to the simulation config (default: config.yaml)")
+    p.add_argument("--events", default="events_config.yaml",
+                   help="path to the injected-pattern config "
+                        "(default: events_config.yaml)")
+    p.add_argument("--outdir", default=".",
+                   help="directory holding raw_daily_wide.csv, and where the "
+                        "reshaped CSVs are written (default: .)")
+    return p.parse_args()
 
 
 def main():
-    with open("config.yaml") as f:
-        config = yaml.safe_load(f)
-    with open("events_config.yaml") as f:
-        events = pd.DataFrame(yaml.safe_load(f))
+    args = parse_args()
+    outdir = Path(args.outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
 
-    raw = pd.read_csv("raw_daily_wide.csv", parse_dates=["DATE"])
+    with open(args.config) as f:
+        config = yaml.safe_load(f)
+    with open(args.events) as f:
+        raw_events = yaml.safe_load(f) or []
+    events = pd.DataFrame(raw_events, columns=[
+        "pattern_id", "pattern_type", "country", "channel",
+        "start_day", "end_day", "multiplier", "description",
+    ])
+
+    raw = pd.read_csv(outdir / "raw_daily_wide.csv", parse_dates=["DATE"])
 
     country_names = {c["code"]: c["name"] for c in config["countries"]}
     revenue_per_conv = config["revenue_per_conv"]
@@ -131,16 +166,16 @@ def main():
     sales_df = pd.concat(sales_parts, ignore_index=True)
     ground_truth_df = build_ground_truth(events, dates_by_country)
 
-    media_df.to_csv("media.csv", index=False)
-    sales_df.to_csv("sales.csv", index=False)
-    ground_truth_df.to_csv("ground_truth.csv", index=False)
+    media_df.to_csv(outdir / "media.csv", index=False)
+    sales_df.to_csv(outdir / "sales.csv", index=False)
+    ground_truth_df.to_csv(outdir / "ground_truth.csv", index=False)
 
     roi = media_df.groupby("advertising_channel").agg(
         true_spend=("media_investment", "sum"),
         true_revenue=("conversion_value", "sum"),
     )
     roi["true_roi"] = roi["true_revenue"] / roi["true_spend"]
-    roi.reset_index().to_csv("true_roi.csv", index=False)
+    roi.reset_index().to_csv(outdir / "true_roi.csv", index=False)
 
     print(f"Wrote media.csv ({len(media_df)} rows), sales.csv ({len(sales_df)} rows)")
     print(f"Wrote ground_truth.csv ({len(ground_truth_df)} events) and true_roi.csv")
