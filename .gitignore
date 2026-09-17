@@ -238,3 +238,6 @@ benchmark/datasets/*/*/true_roi.csv
 
 # SDD scratch workspace
 .superpowers/
+
+# Design spec and implementation plans: kept local until publication
+docs/superpowers/
