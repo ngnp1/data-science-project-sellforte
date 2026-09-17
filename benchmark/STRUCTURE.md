@@ -11,8 +11,6 @@ At a high level, the data goes through these components in order:
 3. `datasets/` stores the frozen output.
 4. `eval/` scores a detector against that output.
 
-No detector exists yet, so `eval/` has nothing to score today. It is ready for the branch that adds one.
-
 ## `spec/`: Defining the scenarios
 
 The `spec/` package contains the complete scenario definitions. It is deterministic and committed to the repository, so it effectively serves as the benchmark's answer key.
@@ -59,6 +57,8 @@ A detector must never read:
 * `datasets/dev_truth/`
 * `datasets/test_truth/`
 
+A detector must also never import `benchmark.spec` or `benchmark.eval`. Those packages hold or produce the answers, and importing either one reaches the answer key directly, without opening a truth file at all.
+
 The truth directories are used only after the detector produces its results. They allow you to evaluate how accurate the detector was.
 
 ## `eval/`: Scoring a detector
@@ -75,18 +75,17 @@ The `eval/` package exists now. The core path, in call order:
 
 Entry points and support:
 
+* **`adapter.py`** converts a `detection.model.DetectedEvent` into the harness `Event`. The dependency points this way so that `detection/` stays blind to the harness.
 * **`run_dev.py`** scores a detector against the dev split. Run it as often as you like.
 * **`run_final.py`** scores a detector against the sealed test split. It needs an explicit `--finalize` flag and checks the seal before it reads anything.
 * **`detectors_for_testing.py`** holds the oracles that prove the harness recognizes a correct detector. They are for the dev split only.
 * **`README.md`** explains how to run all of this.
 
-No detector exists on this branch yet. A later branch adds `detection/` and an `adapter.py` that converts its output into the `Event` shape this layer scores. The dependency points from the harness to the detector, never the other way.
-
 ## The audit trail
 
 Two files record what happened. Neither one is a log that anybody may rewrite.
 
-* **`eval/dev_history.jsonl`** records every development run. It holds 3 records today, from the baseline oracles that prove this harness works.
-* **`eval/final_runs.jsonl`** records the single final run against the sealed test split. It does not exist yet. It is created the first time `run_final.py --finalize` runs, and after that it holds exactly one record for the life of the project.
+* **`eval/dev_history.jsonl`** records every development run. It holds 23 records today.
+* **`eval/final_runs.jsonl`** records the single final run against the sealed test split. It holds 1 record.
 
 `BENCHMARK.md` explains why that matters.
