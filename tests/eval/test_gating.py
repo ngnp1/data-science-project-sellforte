@@ -97,19 +97,52 @@ def test_detection_package_has_no_import_path_to_truth():
     assert not offenders, f"detection/ reaches for truth: {offenders}"
 
 
+# One file, by name, is allowed to be Markdown instead of Python: a README
+# a reader opens to find the pipeline and the primitives without opening the
+# code. It holds no data and nothing here can import it as a smuggled answer
+# table, so it is a narrow exemption, not a loophole -- the test below proves
+# the guard still catches everything else.
+NON_SOURCE_EXEMPT_FILENAMES = {"README.md"}
+
+
 def test_the_detection_package_contains_only_source():
     """The import scan and the final-run audit hash both used to look at *.py
     alone. A precomputed answer table dropped under detection/ as JSON, CSV or
     Parquet would have been read by the detector, scanned by neither, and
     covered by no hash -- a way to smuggle in the answers that leaves no trace
-    in the audit record. detection/ is source; nothing else belongs there."""
+    in the audit record. detection/ is source; nothing else belongs there,
+    except the one exempt file named above."""
     det = ROOT / "detection"
     if not det.is_dir():
         return
     intruders = [str(f.relative_to(ROOT)) for f in det.rglob("*")
                  if f.is_file() and f.suffix != ".py"
+                 and f.name not in NON_SOURCE_EXEMPT_FILENAMES
                  and "__pycache__" not in f.parts]
     assert not intruders, f"non-source files under detection/: {intruders}"
+
+
+def test_the_non_source_exemption_is_exactly_one_file():
+    """A broad exemption would let a real answer table hide behind it. This
+    pins the set to exactly the one file it names."""
+    assert NON_SOURCE_EXEMPT_FILENAMES == {"README.md"}
+
+
+def test_the_only_source_guard_still_catches_a_real_intruder():
+    """Positive control: a JSON file under detection/ must still fail the
+    guard above. Proves the exemption is narrow rather than a hole that
+    happens to admit only what exists today."""
+    det = ROOT / "detection"
+    intruder = det / "_gating_test_intruder.json"
+    intruder.write_text("{}")
+    try:
+        offenders = [str(f.relative_to(ROOT)) for f in det.rglob("*")
+                     if f.is_file() and f.suffix != ".py"
+                     and f.name not in NON_SOURCE_EXEMPT_FILENAMES
+                     and "__pycache__" not in f.parts]
+        assert "detection/_gating_test_intruder.json" in offenders
+    finally:
+        intruder.unlink()
 
 
 @pytest.mark.parametrize("line", [
