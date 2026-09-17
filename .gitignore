@@ -239,5 +239,10 @@ benchmark/datasets/*/*/true_roi.csv
 # SDD scratch workspace
 .superpowers/
 
+# Deliverable documents: kept local until publication
+REPORT.md
+ALGORITHM_DESIGN.md
+REPORT_final_metrics.md
+
 # Design spec and implementation plans: kept local until publication
 docs/superpowers/
