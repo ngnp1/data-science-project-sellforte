@@ -1,50 +1,61 @@
-# How the benchmark directory fits together
+# How the Benchmark Directory Is Organized
 
-This is an orientation document. `BENCHMARK.md` holds the use case and the
-numbers. This file holds only the layout.
+This document explains how the benchmark directory is structured.
 
-At this stage, data flows through three parts, in this order:
+The main [`BENCHMARK.md`](BENCHMARK.md) file explains the purpose of the benchmark and summarizes the scenarios. This file focuses only on the directory layout and how data moves through it.
+
+At a high level, the data goes through these components in order:
 
 1. `spec/` defines the scenarios.
-2. `harness/` generates and seals them.
-3. `datasets/` holds the frozen output.
+2. `harness/` generates and seals the data.
+3. `datasets/` stores the frozen output.
 
-A fourth part, `eval/`, scores a detector against that output. It does not
-exist yet on this branch.
+The `eval/` directory will be used to score detectors against the generated data. It does not exist on this branch yet.
 
-## `spec/` defines the scenarios
+## `spec/`: Defining the scenarios
 
-This package is pure, deterministic and committed, so it is the answer key.
-No detector may read it, import it, or ask another agent what it contains.
+The `spec/` package contains the complete scenario definitions. It is deterministic and committed to the repository, so it effectively serves as the benchmark’s answer key.
 
-- `axes.py` holds the pools and presets that a scenario draws from: countries,
-  channels, noise levels, market spread. It knows nothing about events.
-- `events.py` builds the event entries, one function per event family. It also
-  names the two negative-control pattern types in `NON_EVENT_TYPES`.
-- `scenarios.py` assembles the 100 scenarios. `FAMILY_COUNTS` sets the family
-  sizes, `build_split()` returns one split, and `spec_hash()` hashes the
-  definitions for the seal.
+A detector must not read or import this package. It must also not ask another agent to reveal what it contains.
 
-## `harness/` generates and seals
+The main files are:
 
-- `config_writer.py` writes one `Scenario` out as the two YAML files that the R
-  generator reads.
-- `runner.py` runs one scenario through the R and Python generator, then files
-  the output. `media.csv` and `sales.csv` go to the data side. Every other
-  output goes to the truth side. `R_TIMEOUT_S` caps a single R run at 1800 s.
-- `generate.py` is the command-line entry point. It also holds the measured
-  cost model, and it refuses to seal the dev split.
-- `seal.py` writes `manifest.sha256` for both sides and stamps the `SEALED`
-  marker. `verify_seal()` checks the manifests and the recorded `spec_hash`.
+* **`axes.py`** defines the values that scenarios can use, such as countries, channels, noise levels, and market sizes. It does not define events.
+* **`events.py`** creates the event definitions. It contains one function for each event family and defines the two negative-control patterns in `NON_EVENT_TYPES`.
+* **`scenarios.py`** assembles all 100 scenarios. `FAMILY_COUNTS` defines how many scenarios belong to each family, `build_split()` creates a split, and `spec_hash()` creates a hash of the definitions for sealing.
 
-## `datasets/` holds the frozen output
+## `harness/`: Generating and sealing the data
 
-| directory | scenarios | contents |
-|---|---|---|
-| `dev/` | 45 | `media.csv`, `sales.csv` |
-| `dev_truth/` | 45 | `ground_truth.csv`, `meta.json`, `scenario.json`, `true_roi.csv` |
-| `test/` | 55 | `media.csv`, `sales.csv`, plus `SEALED` and `manifest.sha256` |
-| `test_truth/` | 55 | the same four truth files, plus `manifest.sha256` |
+The `harness/` package turns the scenario definitions into datasets and protects the test split from accidental changes.
 
-**The boundary sits here.** A detector under test may read `datasets/dev/`
-and `datasets/test/`. It must never read `dev_truth/` or `test_truth/`.
+* **`config_writer.py`** converts a `Scenario` into the two YAML files required by the R generator.
+* **`runner.py`** runs each scenario through the R and Python generators and stores the results. It writes `media.csv` and `sales.csv` to the dataset side. All other outputs go to the truth side. A single R run is limited to 1,800 seconds by `R_TIMEOUT_S`.
+* **`generate.py`** is the command-line entry point. It also contains the measured cost model and prevents the dev split from being sealed.
+* **`seal.py`** creates `manifest.sha256` files for both sides and adds the `SEALED` marker. `verify_seal()` checks the manifests and confirms that the recorded `spec_hash` is correct.
+
+## `datasets/`: Storing the frozen output
+
+The generated datasets are stored in the following directories:
+
+| Directory     | Scenarios | Contents                                                         |
+| ------------- | --------: | ---------------------------------------------------------------- |
+| `dev/`        |        45 | `media.csv`, `sales.csv`                                         |
+| `dev_truth/`  |        45 | `ground_truth.csv`, `meta.json`, `scenario.json`, `true_roi.csv` |
+| `test/`       |        55 | `media.csv`, `sales.csv`, plus `SEALED` and `manifest.sha256`    |
+| `test_truth/` |        55 | The same four truth files, plus `manifest.sha256`                |
+
+## The detector boundary
+
+The important boundary is between the dataset files and the truth files.
+
+A detector may read:
+
+* `datasets/dev/`
+* `datasets/test/`
+
+A detector must never read:
+
+* `datasets/dev_truth/`
+* `datasets/test_truth/`
+
+The truth directories are used only after the detector produces its results. They allow you to evaluate how accurate the detector was.
