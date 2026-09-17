@@ -1,99 +1,83 @@
 # The Benchmark
 
-This is a set of fake marketing-spend datasets. Each one has a known answer
-hidden in a separate file. You run a detector on the data and check its
-answers against the hidden one.
+This benchmark contains synthetic marketing-spend datasets. Each dataset has a known answer stored in a separate file. You run a detector on the data, then compare its results with the hidden answers.
 
-There are 100 datasets, called **scenarios**. Each scenario is one company's
-daily ad spend and sales, across one or more countries and channels, for one
-or two years.
+There are 100 datasets, called **scenarios**. Each scenario contains a company’s daily advertising spend and sales data for one or more countries and channels, covering one or two years.
 
 ## The two splits
 
-The scenarios are split into two groups:
+The scenarios are divided into two groups:
 
-- **`dev`**, 45 scenarios. Use this one while you build and test a detector.
-  You can look at its answers as often as you like.
-- **`test`**, 55 scenarios. Use this one only once, at the very end, to get
-  an honest score. Do not look at its answers before that.
+* **`dev`**: 45 scenarios for developing and testing your detector. You can check the correct answers as often as needed.
+* **`test`**: 55 scenarios for the final evaluation. Do not check the answers in advance.
 
-This split exists so the final score means something. If a detector is tuned
-against the same data it is scored on, the score stops telling you anything
-useful.
+This separation makes the final score meaningful. If you tune a detector using the same data on which it is evaluated, the score may no longer reflect how well it performs on unseen data.
 
-## Where the files live
+## File locations
 
-```
-benchmark/datasets/dev/<scenario_id>/media.csv         the data
+```text
+benchmark/datasets/dev/<scenario_id>/media.csv
 benchmark/datasets/dev/<scenario_id>/sales.csv
-benchmark/datasets/dev_truth/<scenario_id>/ground_truth.csv   the answer
+benchmark/datasets/dev_truth/<scenario_id>/ground_truth.csv
+```
 
-benchmark/datasets/test/<scenario_id>/...               same shape, for test
+The test split follows the same structure:
+
+```text
+benchmark/datasets/test/<scenario_id>/...
 benchmark/datasets/test_truth/<scenario_id>/...
 ```
 
-A detector reads only `media.csv` and `sales.csv`. It never reads anything
-under `dev_truth/` or `test_truth/`. Those folders exist only to check the
-detector's answers afterward.
+## What each scenario contains
 
-## What is inside each scenario
+Each scenario contains a small number of artificial **events** inserted into otherwise normal spend data. An event is a period during which something unusual happens: for example, a channel stops spending or its budget suddenly changes.
 
-Every scenario plants a small number of "events" in otherwise normal spend
-data. An event is a stretch of days where something unusual happens, such as
-a channel going dark or a budget jumping to a new level. The full list:
+The benchmark includes the following event types:
 
-| event | what happens |
-|---|---|
-| dark period | every channel in a market stops at once |
-| single-channel period | every channel but one stops |
-| natural holdout | one channel stops while the rest keep running |
-| step change | a channel's spend jumps to a new level and holds |
-| channel pulse | a channel switches on and off several times |
-| staggered launch | a channel turns on later in some markets than others |
+| Event                 | Description                                                    |
+| --------------------- | -------------------------------------------------------------- |
+| Dark period           | All channels in a market stop spending at the same time.       |
+| Single-channel period | All channels except one stop spending.                         |
+| Natural holdout       | One channel stops while the others continue running.           |
+| Step change           | A channel’s spend jumps to a new level and remains there.      |
+| Channel pulse         | A channel repeatedly switches on and off.                      |
+| Staggered launch      | A channel starts running later in some markets than in others. |
 
-Some scenarios have no event at all. These are here so you can measure how
-often a detector raises a false alarm on ordinary data.
+Some scenarios contain no event. These scenarios measure how often a detector raises a false alarm on normal data.
 
-## How many of each
+## Scenario distribution
 
-| family | dev | test |
-|---|---|---|
-| no event | 4 | 5 |
-| dark period | 3 | 4 |
-| single-channel | 3 | 4 |
-| natural holdout | 3 | 4 |
-| step change | 5 | 6 |
-| channel pulse | 3 | 4 |
-| staggered launch | 3 | 4 |
-| cross-market event | 3 | 4 |
-| several events mixed together | 8 | 10 |
-| edge cases | 10 | 10 |
-| **total** | **45** | **55** |
+| Scenario family         |    Dev |   Test |
+| ----------------------- | -----: | -----: |
+| No event                |      4 |      5 |
+| Dark period             |      3 |      4 |
+| Single-channel period   |      3 |      4 |
+| Natural holdout         |      3 |      4 |
+| Step change             |      5 |      6 |
+| Channel pulse           |      3 |      4 |
+| Staggered launch        |      3 |      4 |
+| Cross-market event      |      3 |      4 |
+| Several events combined |      8 |     10 |
+| Edge cases              |     10 |     10 |
+| **Total**               | **45** | **55** |
 
-Scenarios also vary in noise level, trend, number of countries, number of
-channels, and market size, so a detector gets tested under more than one
-condition.
+The scenarios also vary in noise level, trends, number of countries, number of channels, and market size. This ensures that the detector is tested under a range of conditions.
 
-## How to generate the data
+## Generating the data
 
-The data is already generated and frozen. You only need this if you want to
-rebuild it from scratch:
+The data has already been generated and frozen. You only need these commands if you want to rebuild it from scratch:
 
 ```bash
 python -m benchmark.harness.generate --split dev
 python -m benchmark.harness.generate --split test --seal
 ```
 
-Rebuilding uses the same code every time, so it produces the same 100
-scenarios. `--seal` locks the test split so nobody can change it by
-accident afterward.
+The generator is deterministic. The `--seal` option locks the test split to prevent accidental changes.
 
-## How to score a detector
+## Scoring a detector
 
-See [`benchmark/eval/README.md`](eval/README.md). It has the exact command
-and explains what the score means.
+See [`benchmark/eval/README.md`](eval/README.md) for the exact command and an explanation of the score.
 
-## Want more detail?
+## More information
 
-[`benchmark/STRUCTURE.md`](STRUCTURE.md) explains how this folder is put
-together, for anyone extending the benchmark itself.
+[`benchmark/STRUCTURE.md`](STRUCTURE.md) explains how the benchmark directory is organized and is intended for anyone extending the benchmark.
