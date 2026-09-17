@@ -9,12 +9,13 @@ At a high level, the data goes through these components in order:
 1. `spec/` defines the scenarios.
 2. `harness/` generates and seals the data.
 3. `datasets/` stores the frozen output.
+4. `eval/` scores a detector against that output.
 
-The `eval/` directory will be used to score detectors against the generated data. It does not exist on this branch yet.
+No detector exists yet, so `eval/` has nothing to score today. It is ready for the branch that adds one.
 
 ## `spec/`: Defining the scenarios
 
-The `spec/` package contains the complete scenario definitions. It is deterministic and committed to the repository, so it effectively serves as the benchmark’s answer key.
+The `spec/` package contains the complete scenario definitions. It is deterministic and committed to the repository, so it effectively serves as the benchmark's answer key.
 
 A detector must not read or import this package. It must also not ask another agent to reveal what it contains.
 
@@ -59,3 +60,33 @@ A detector must never read:
 * `datasets/test_truth/`
 
 The truth directories are used only after the detector produces its results. They allow you to evaluate how accurate the detector was.
+
+## `eval/`: Scoring a detector
+
+The `eval/` package exists now. The core path, in call order:
+
+* **`model.py`** holds the shared vocabulary: the `Event` dataclass, `TYPE_MAP`, and `NON_EVENT_TYPES`. It holds no logic.
+* **`truth.py`** loads ground truth into matchable intervals. It settles two of the loader traps `BENCHMARK.md` lists and decides the convention for a third.
+* **`matching.py`** matches detections to truth greedily by temporal IoU, one to one, at a threshold of 0.5.
+* **`metrics.py`** computes the ten metrics of spec section 9.
+* **`breakdowns.py`** slices the results per axis. It carries the confounding warning along with the numbers.
+* **`runner.py`** runs a detector over a whole split and aggregates everything above.
+* **`report.py`** renders one result as Markdown.
+
+Entry points and support:
+
+* **`run_dev.py`** scores a detector against the dev split. Run it as often as you like.
+* **`run_final.py`** scores a detector against the sealed test split. It needs an explicit `--finalize` flag and checks the seal before it reads anything.
+* **`detectors_for_testing.py`** holds the oracles that prove the harness recognizes a correct detector. They are for the dev split only.
+* **`README.md`** explains how to run all of this.
+
+No detector exists on this branch yet. A later branch adds `detection/` and an `adapter.py` that converts its output into the `Event` shape this layer scores. The dependency points from the harness to the detector, never the other way.
+
+## The audit trail
+
+Two files record what happened. Neither one is a log that anybody may rewrite.
+
+* **`eval/dev_history.jsonl`** records every development run. It holds 3 records today, from the baseline oracles that prove this harness works.
+* **`eval/final_runs.jsonl`** records the single final run against the sealed test split. It does not exist yet. It is created the first time `run_final.py --finalize` runs, and after that it holds exactly one record for the life of the project.
+
+`BENCHMARK.md` explains why that matters.
