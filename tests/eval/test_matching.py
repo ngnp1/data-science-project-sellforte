@@ -178,3 +178,41 @@ def test_strict_matching_is_unaffected_by_the_agreement_tie_break():
     b = match_events(t, list(reversed(p)))
     assert len(a.matches) == 1 and len(b.matches) == 1
     assert a.matches[0].pred.start == b.matches[0].pred.start
+
+
+def test_overlapping_events_reassign_to_preserve_two_valid_matches():
+    from itertools import permutations
+    truth = [e("2024-01-01", "2024-01-07"), e("2024-01-01", "2024-01-15")]
+    pred = [e("2024-01-01", "2024-01-09"), e("2024-01-03", "2024-01-09")]
+    assignments = []
+    for ts in permutations(truth):
+        for ps in permutations(pred):
+            result = match_events(list(ts), list(ps))
+            assert result.n_tp == 2
+            assert result.n_fp == result.n_fn == 0
+            assignments.append(sorted((m.truth.end, m.pred.start) for m in result.matches))
+    assert all(x == assignments[0] for x in assignments)
+
+
+def test_match_count_agrees_with_exhaustive_small_assignments():
+    import random
+    from itertools import permutations
+    rng = random.Random(42)
+    for _ in range(60):
+        def interval():
+            start = rng.randint(1, 15)
+            end = rng.randint(start, 28)
+            return e(f"2024-01-{start:02}", f"2024-01-{end:02}")
+        truth, pred = [interval() for _ in range(4)], [interval() for _ in range(4)]
+        expected = max(sum(iou(t, p) >= 0.5 for t, p in zip(truth, order))
+                       for order in permutations(pred))
+        got = match_events(truth, pred)
+        assert got.n_tp == expected
+        assert got.n_tp + got.n_fp == len(pred)
+        assert got.n_tp + got.n_fn == len(truth)
+
+
+def test_repeated_object_is_still_counted_as_duplicate_prediction():
+    t = e("2024-01-01", "2024-01-10")
+    got = match_events([t], [t, t])
+    assert (got.n_tp, got.n_fp, got.n_fn) == (1, 1, 0)

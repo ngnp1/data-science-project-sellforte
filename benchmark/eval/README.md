@@ -60,3 +60,26 @@ Event-level breakdowns show recall only. A false positive does not belong to any
 `run_final.py` refuses to run without `--finalize`. It checks the test split's seal before reading anything. Then it records a SHA-256 hash of every Python file under `detection/`, plus the sealed spec hash, to `final_runs.jsonl`. You can run it more than once, but every run after the first stays permanently visible in that file.
 
 `run_final.py` writes that record before it renders the report. A typo in `--out` cannot spend your one run without leaving a trace.
+
+## Evaluation corrections
+
+The matcher now maximizes the number of valid one-to-one matches. It starts
+with strongest overlaps and reassigns pairs when that allows more matches;
+it does not optimize total IoU among equally sized assignments.
+
+Pulse reports include separate precision, recall, and F1 for individual
+off-windows, plus coverage of actual off-days. Missing prediction components
+receive no component matches. Missing truth components are reported as an
+incomplete assessment. Read these metrics alongside grouped-event F1, which
+still measures the outer window and grouping.
+
+Day coverage F1 ignores event type and uses pulse envelopes. It measures timing
+coverage, not classification or individual pulse accuracy. Boundary and IoU
+statistics describe matched events only.
+
+The operating curve is unavailable when there are no predictions or any
+prediction lacks a confidence score. Headline metrics still include all
+predictions. Confidence reliability requires meaningful probability scores.
+
+These corrections can change scores. Preserve historical logs and compare
+versions using the same evaluator and dataset.

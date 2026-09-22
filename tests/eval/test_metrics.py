@@ -1,3 +1,6 @@
+from pathlib import Path
+import pytest
+
 import pandas as pd
 
 from benchmark.eval import metrics as M
@@ -195,15 +198,14 @@ def test_reliability_curve_counts_every_bin_boundary_confidence():
     assert sum(b["n"] for b in curve) == len(pred)
 
 
-def test_operating_curve_keeps_unscored_predictions_at_every_cut():
-    """Opposite of reliability_curve's null rule: an unscored detection must
-    survive every confidence cut rather than vanishing, so a detector that
-    never scores anything still produces a meaningful curve instead of one
-    that empties out at the first threshold."""
+def test_operating_curve_unavailable_for_unscored_or_mixed_predictions():
+    from dataclasses import replace
     t = [e("2024-03-01", "2024-03-10")]
-    p = [e("2024-03-01", "2024-03-10")]  # detection_confidence is None
-    curve = M.operating_curve(t, p, cuts=[0.0, 0.5, 0.9, 1.0])
-    assert all(c["n_pred"] == 1 for c in curve)
+    scored = replace(t[0], detection_confidence=0.8)
+    assert M.operating_curve(t, []) == []
+    assert M.operating_curve(t, t) == []
+    assert M.operating_curve(t, [t[0], scored]) == []
+    assert M.operating_curve(t, [scored], cuts=[0, 1])[1]["n_pred"] == 0
 
 
 def test_day_level_and_event_level_diverge_on_split_predictions():
@@ -321,6 +323,10 @@ def test_operating_curve_keeps_full_confidence_detections_at_the_strictest_cut()
     assert M.operating_curve(t, p)[-1]["recall"] == 1.0
 
 
+@pytest.mark.skipif(
+    not (Path(__file__).resolve().parents[2] / "benchmark/datasets/dev_truth/dev_045/meta.json").exists(),
+    reason="Generated benchmark data is unavailable",
+)
 def test_market_accuracy_reads_the_same_whichever_market_is_dropped():
     """I5, on the real dev scenario that exposed it. `dev_045` is a
     `global_pause`: FR and NL share one identical dark window. A detector that
@@ -343,3 +349,42 @@ def test_market_accuracy_reads_the_same_whichever_market_is_dropped():
         f"same detector quality, different reading: {readings}")
     assert readings["FR"]["market_accuracy"] == 1.0, (
         "the one market that WAS found should read as correctly attributed")
+
+
+def test_pulse_components_detect_missing_shifted_extra_and_duplicate_pauses():
+    from dataclasses import replace
+    a = (pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-07"))
+    b = (pd.Timestamp("2024-01-24"), pd.Timestamp("2024-01-30"))
+    t = replace(e("2024-01-01", "2024-01-30"),
+                event_type="channel_pulse", components=(a, b))
+    perfect = M.pulse_components([t], [t])
+    assert perfect["event_level"]["f1"] == 1
+    assert perfect["day_level"]["f1"] == 1
+    missing = replace(t, components=())
+    assert M.event_level([t], [missing])["f1"] == 1  # envelope alone passes
+    got = M.pulse_components([t], [missing])
+    assert got["event_level"]["n_fn"] == 2
+    assert got["day_level"]["f1"] == 0
+    assert got["missing_pred_components"] == 1
+    one = M.pulse_components([t], [replace(t, components=(a,))])
+    assert one["event_level"]["recall"] == 0.5
+    extra = (pd.Timestamp("2024-01-12"), pd.Timestamp("2024-01-18"))
+    got = M.pulse_components([t], [replace(t, components=(a, b, extra))])
+    assert got["event_level"]["n_fp"] == 1
+    shifted = (pd.Timestamp("2024-01-25"), pd.Timestamp("2024-01-30"))
+    got = M.pulse_components([t], [replace(t, components=(a, shifted))])
+    assert got["event_level"]["f1"] == 1
+    assert got["day_level"]["recall"] == 13 / 14
+    got = M.pulse_components([t], [replace(t, components=(a, b, b))])
+    assert got["event_level"]["n_fp"] == 1
+    assert M.pulse_components([t], [replace(t, country_code="XX")])["event_level"]["n_tp"] == 0
+    assert M.pulse_components([], [t])["event_level"]["n_fp"] == 2
+    assert M.pulse_components([missing], [t])["missing_truth_components"] == 1
+
+
+def test_day_coverage_is_explicitly_type_agnostic():
+    from dataclasses import replace
+    t = e("2024-03-01", "2024-03-10")
+    p = replace(t, event_type="step_change")
+    assert M.day_level([t], [p])["f1"] == 1
+    assert M.event_level([t], [p])["f1"] == 0

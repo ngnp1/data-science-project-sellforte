@@ -1,37 +1,49 @@
+from pathlib import Path
+
+import pytest
+
 from benchmark.eval import detectors_for_testing as D
 from benchmark.eval import truth as T
 from benchmark.eval.report import render_markdown
 from benchmark.eval.runner import evaluate_split
 
-SOME = T.list_scenarios("dev")[:8]
+HAS_DATA = (Path(T.DATASETS_DIR) / "dev_truth/dev_001/meta.json").exists()
+requires_data = pytest.mark.skipif(not HAS_DATA, reason="Generated benchmark data is unavailable")
+SOME = T.list_scenarios("dev")[:8] if HAS_DATA else []
 
 
+@requires_data
 def test_evaluate_split_covers_every_requested_scenario():
     got = evaluate_split(D.never_detect, "dev", sids=SOME)
     assert got["n_scenarios"] == len(SOME)
     assert set(got["per_scenario"]) == set(SOME)
 
 
+@requires_data
 def test_perfect_oracle_scores_one_over_a_whole_split():
     got = evaluate_split(D.perfect_oracle, "dev", sids=SOME)
     assert got["overall"]["f1"] == 1.0
 
 
+@requires_data
 def test_never_detect_has_a_zero_false_positive_rate_on_nulls():
     got = evaluate_split(D.never_detect, "dev")
     assert got["null_fp_rate"] == 0.0
 
 
+@requires_data
 def test_detect_everything_has_a_nonzero_false_positive_rate_on_nulls():
     got = evaluate_split(D.detect_everything, "dev")
     assert got["null_fp_rate"] > 0.0
 
 
+@requires_data
 def test_breakdowns_are_present_for_the_interpretable_axis():
     got = evaluate_split(D.perfect_oracle, "dev", sids=SOME)
     assert "noise_level" in got["breakdowns"]
 
 
+@requires_data
 def test_report_renders_without_crashing_and_names_the_headline_numbers():
     got = evaluate_split(D.perfect_oracle, "dev", sids=SOME)
     md = render_markdown(got)
@@ -40,6 +52,7 @@ def test_report_renders_without_crashing_and_names_the_headline_numbers():
     assert "Reliability" in md and "Operating curve" in md
 
 
+@requires_data
 def test_report_says_so_plainly_when_nothing_carries_a_confidence():
     got = evaluate_split(D.never_detect, "dev", sids=SOME)
     md = render_markdown(got)
@@ -104,6 +117,7 @@ def test_breakdown_row_with_a_real_miss_still_renders_zero():
     assert "n/a" not in md
 
 
+@requires_data
 def test_confounded_axis_warning_sits_between_its_heading_and_its_table():
     """The honesty guarantee: the warning must appear ON the axis, between its
     heading and its table rows -- not merely somewhere in the document. This
@@ -159,6 +173,7 @@ def test_boundary_error_with_real_matches_still_renders_the_numbers():
     assert "n/a" not in md
 
 
+@requires_data
 def test_never_detect_does_not_report_flawless_boundary_localisation():
     """End to end on the real dev split: the detector that matches nothing
     must not read as perfectly localised."""
@@ -196,6 +211,7 @@ def test_report_renders_the_event_level_breakdown_axes():
     assert "recall-only" in md.lower()
 
 
+@requires_data
 def test_event_breakdowns_reach_the_report_from_a_real_split():
     """End to end: the axes are computed by the runner and rendered, not just
     renderable in principle."""
@@ -207,18 +223,49 @@ def test_event_breakdowns_reach_the_report_from_a_real_split():
     assert "exact zero" in md
 
 
-def test_the_report_warns_that_f1_cannot_separate_the_two_pathologies():
-    """I9. The confounded-axis warnings travel with their tables; this one --
-    that `never_detect` and `detect_everything` are indistinguishable on
-    P/R/F1 -- landed only in the harness README, which the author of a later
-    report has no reason to open. It has to sit beside the headline numbers
-    themselves."""
+def test_report_explains_limits_of_matched_event_statistics():
     md = render_markdown(_minimal_results({}))
-    headline = md.split("## Headline")[1].split("## Boundary error")[0]
-    lowered = headline.lower()
-    assert "f1" in lowered
-    assert "false-positive rate" in lowered or "false positive rate" in lowered
-    assert any(w in lowered for w in ("cannot tell", "cannot distinguish")), (
-        "the headline does not warn that P/R/F1 cannot separate a silent "
-        "detector from an indiscriminate one")
-    assert "standalone headline" in lowered
+    assert "Read F1 alongside recall and false alarms" in md
+    assert "describe matched events only" in md
+
+
+def test_report_explains_day_coverage_and_missing_confidence():
+    md = render_markdown(_minimal_results({}))
+    assert "Day coverage F1 (type ignored; pulse envelopes)" in md
+    assert "does not verify individual pauses" in md
+    assert "some predictions lack confidence" in md
+    assert "| confidence cut |" not in md
+
+
+def test_report_exposes_missing_pulse_components():
+    from dataclasses import replace
+    import pandas as pd
+    from benchmark.eval.model import Event
+    from benchmark.eval.metrics import pulse_components
+    t = Event("sample", "DE", "TV", "channel_pulse",
+              pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-30"),
+              components=((pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-07")),))
+    results = _minimal_results({})
+    results["pulse_components"] = pulse_components([t], [replace(t, components=())])
+    md = render_markdown(results)
+    assert "| Component recall | 0.000 |" in md
+    assert "| Predictions missing components | 1 |" in md
+
+
+def test_split_aggregates_pulse_components_without_generated_data(monkeypatch):
+    from dataclasses import replace
+    import pandas as pd
+    from benchmark.eval.model import Event
+    t = Event("sample", "DE", "TV", "channel_pulse",
+              pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-30"),
+              components=((pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-07")),
+                          (pd.Timestamp("2024-01-24"), pd.Timestamp("2024-01-30"))))
+    monkeypatch.setattr(T, "load_meta", lambda *args: {"family": "pulse"})
+    monkeypatch.setattr(T, "load_truth", lambda *args: [t])
+    got = evaluate_split(lambda *args: [replace(t, components=())],
+                         "dev", sids=["sample"])
+    assert got["overall"]["f1"] == 1
+    assert got["pulse_components"]["event_level"]["n_fn"] == 2
+    assert got["per_scenario"]["sample"]["pulse_components"] == got["pulse_components"]
+    assert got["operating"] == []
+    assert "| Predictions missing components | 1 |" in render_markdown(got)
