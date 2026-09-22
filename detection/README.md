@@ -1,88 +1,62 @@
-# The Detection Library
+# How the detector works
 
-This package finds informative periods in marketing spend data: dark periods, single-channel periods, natural holdouts, step changes, channel pulses, and staggered launches. It takes two CSV files and returns a list of labeled events.
+The detector reads daily media spend and returns a list of events. Sales data is optional: it helps rank findings but is not needed to find spend changes.
 
-This package never reads the benchmark's answer key. It cannot import any of the benchmark's own packages, by name or by path. A test checks this on every run. See `../benchmark/STRUCTURE.md` for why that boundary matters.
+## Use it in Python
 
-## How to run it
+After following the [project setup](../README.md), run this from the repository folder:
 
 ```python
+import pandas as pd
 from detection.pipeline import run_detection
 
-events = run_detection(media_df, sales_df, sid="dev_001")
+media = pd.read_csv("synthetic_data_generator/data/media.csv")
+events = run_detection(media, sid="sample")
+
+for event in events:
+    print(event.event_type, event.start, event.end, event.explanation)
 ```
 
-`media_df` and `sales_df` are the same two frames the benchmark uses. `sales_df` is optional. Detection runs on spend alone. Sales only feeds a later scoring step.
+To include sales, load its CSV and pass it as `run_detection(media, sales, sid="sample")`. See the [input columns](../README.md#use-your-own-data).
 
-## The pipeline, in order
+## From data to findings
 
-1. **Build a panel.** `io/panel.py` turns the two input frames into one daily table, indexed by country and channel.
-2. **Normalize each series.** `io/normalize.py` turns raw spend into a scale-free series, so a large market and a small market can be compared the same way.
-3. **Find the four primitive patterns.** The `primitives/` package looks for off-runs, level shifts, pulse trains, and onsets. Each one works on a single channel's series and knows nothing about event types.
-4. **Label each market.** `compose/label.py` turns the primitives into typed events by watching which channels are active over time.
-5. **Compare across markets.** `compose/cross_market.py` checks whether an event has a control group elsewhere, and finds channels that turned on late in some markets.
-6. **Score and explain.** Each event gets a confidence score, an informativeness score, a validity check, and a plain-language explanation.
+1. **Prepare daily data.** Sum campaign rows by market, channel, and date. Keep track of missing rows so they can trigger warnings.
+2. **Estimate normal spend.** Use each channel's positive spend to estimate its usual level. This lets the same rules work across markets of different sizes.
+3. **Find changes.** Look for pauses, sustained budget changes, repeated pauses, and channels that start late.
+4. **Assign event types.** Check which other channels stayed active. For example, all channels pausing together becomes a dark period. With two channels, a pause in one is labelled a natural holdout.
+5. **Compare markets.** Look for peers that kept the relevant channels active throughout the event, and compare launch dates.
+6. **Score and explain.** Return the finding, its evidence, possible data problems, and a readable explanation.
 
-`pipeline.py` runs all six steps and returns one list of events.
+## The main rules
 
-## Where each event type comes from
+| Pattern | How it is found |
+|---|---|
+| Pause | Spend is at most 15% of the channel's usual positive level, with a small floor for values close to zero. Runs must meet duration and notability rules. |
+| Budget change | Compare spending levels around a possible change and check that the new level lasts. Restarting from zero alone is not enough. |
+| Pulse | Group nearby pauses of similar length. The rule does not require perfectly regular spacing. Each off-window is stored separately. |
+| Late launch | Find an initial inactive period followed by activity, then compare it with other markets. |
 
-| Event type | Found by | Primitive it uses |
-|---|---|---|
-| `dark_period` | `compose/label.py` | `primitives/zero_runs.py` |
-| `single_channel` | `compose/label.py` | `primitives/zero_runs.py` |
-| `natural_holdout` | `compose/label.py` | `primitives/zero_runs.py` |
-| `step_change` | `compose/label.py` | `primitives/level_shift.py` |
-| `channel_pulse` | `compose/label.py` | `primitives/pulse.py` |
-| `staggered_launch` | `compose/cross_market.py` | `primitives/onset.py` |
+The minimum reportable duration is seven days. Exact thresholds live in [params.py](params.py); the pattern rules live in [primitives/](primitives/).
 
-The first five event types come from watching one market on its own. A staggered launch needs to compare markets against each other. `compose/cross_market.py` finds it separately, after the other five.
+## Read an event
 
-## The four primitives
+Each [DetectedEvent](model.py) includes its type, market, channel, dates, scores, explanation, and validity warnings. A dark period has no single channel. Both dates are inclusive. For pulses, `components` contains the individual off-windows; `start` and `end` cover the whole group.
 
-Each primitive works on one channel's daily spend and finds a pattern in it. None of them know what event type they will become. That decision happens later, in `compose/`.
+Confidence and informativeness are heuristic scores, not probabilities or estimates of advertising's effect on sales. The old calibration is retained for reference but is not applied.
 
-* **`primitives/zero_runs.py`** finds runs of days where a channel was off, and decides which runs are long or unusual enough to matter. `compose/label.py` reads these runs to decide between a dark period, a single-channel period, and a natural holdout, based on how many channels went off together.
-* **`primitives/level_shift.py`** finds a channel's spend moving to a new level and holding there. It also finds where that new level ends, if it does.
-* **`primitives/pulse.py`** finds a channel switching on and off in a regular pattern, and groups the whole pattern into one event.
-* **`primitives/onset.py`** finds a channel that stayed off from day one of the data, or stopped and never came back.
+A `censored_start` or `censored_end` flag means the data does not show the event's full boundary. For example, a permanent budget change is reported through the last available day, without claiming it stopped then. Overlapping events reduce informativeness because their effects may be difficult to separate.
 
-## The composition layer
+Missing rows or a spend pause without a corresponding drop in available impressions can trigger validity warnings. Unknown, infinite, or negative spend values are rejected. Optional missing metrics are treated as unknown evidence.
 
-* **`compose/label.py`** watches which channels are active in a market, day by day. Whenever that set of active channels changes, it marks a new period and decides what kind of event that period represents.
-* **`compose/cross_market.py`** takes the events `label.py` found and checks each one against the other markets: did a peer market keep the channel running? It also builds staggered launch events by comparing onset dates across markets.
+## Where to make changes
 
-## Scoring and explanation
+| Files | Responsibility |
+|---|---|
+| [pipeline.py](pipeline.py) | Runs detection from beginning to end. |
+| [io/](io/) | Prepares and rescales daily data. |
+| [primitives/](primitives/) | Finds individual patterns. |
+| [compose/](compose/) | Labels events and compares markets. |
+| [score.py](score.py), [validity.py](validity.py), [explain.py](explain.py) | Ranks findings, checks data quality, and writes explanations. |
 
-* **`score.py`** computes a confidence score, how sure the detector is, and an informativeness score, how useful the event is for analysis. Each score comes from several smaller signals.
-* **`validity.py`** checks an event for signs of a data problem rather than a real marketing event. Missing rows are one sign. A spend drop with no matching change in impressions is another.
-* **`explain.py`** turns one event into a plain-language sentence, stating what happened, when, and how it compares to that channel's normal spend.
-* **`calibrate.py`** provides optional calibration utilities. `calibration_fit.py` retains the historical fit; the revised pipeline does not apply it. Current confidence values are explicitly labelled heuristic scores, not probabilities.
-
-## Two files with no events in them
-
-* **`model.py`** defines `DetectedEvent`, the shape every event takes on its way out of this package. It also lists the six event types by name.
-* **`params.py`** holds every threshold and constant this library uses, such as how long an off-run has to be before it counts. Nothing else in this package should hardcode a number that belongs here.
-
-## Two files with no algorithm in them
-
-* **`io/panel.py`** and **`io/normalize.py`** hold no detection logic. They only reshape and rescale the input data so the primitives can compare across channels and markets fairly.
-* **`calibration_fit.py`** holds no logic either. It is a generated file: the frozen output of one run of `calibrate.py` against the development split.
-
-## Current behavior and limitations
-
-Pulse trains group nearby pauses of similar length, independently of whether
-those pauses are unusual relative to one another. This supports long regular
-trains and prevents one unrelated shutdown from invalidating the whole pattern.
-A permanent budget change is emitted with `censored_end=True`; its observed
-window does not claim the actual change ended on the last available date.
-
-Unknown or negative spend is rejected. Absent rows retain a presence mask and
-produce validity warnings. Impressions and clicks are optional. Peer controls
-must remain active throughout the window, and sibling controls must exist and
-remain active. These are candidates for comparison, not proven causal controls.
-
-Scores now include measured step sharpness, pulse-component corroboration,
-overlap penalties and boundary censoring. The legacy constant calibration is
-archived; raw scores must not be interpreted as probabilities. The main README
-provides the local viewer, sample check, and current limitations.
+Keep detection independent of benchmark definitions and answer files. Tests check this code boundary. See the [project limitations](../README.md#what-the-scores-mean) before interpreting results.

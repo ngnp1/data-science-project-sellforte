@@ -1,11 +1,19 @@
-# Detecting informative marketing periods
+# Finding useful periods in marketing data
 
-Find dark periods, single-channel periods, natural holdouts, budget steps,
-pulse trains, and staggered launches in daily marketing data.
+This school project finds changes in daily advertising spend that may help someone study marketing performance. It includes a detector, a local viewer, and synthetic data with known events for testing.
 
-## Run locally
+| Event | What it means |
+|---|---|
+| Dark period | All channels in a market pause. |
+| Single-channel period | Only one channel keeps running. |
+| Natural holdout | One channel pauses while others continue. |
+| Step change | A channel's budget moves to a different level. |
+| Channel pulse | A channel pauses several times, with spending between pauses. |
+| Staggered launch | A channel starts later in one market than in others. |
 
-Use Python 3.12 (the tested version). From the repository root:
+## Run the viewer
+
+Use Python 3.12, the version tested for this project. Run these commands from the repository folder:
 
 ```bash
 python3.12 -m venv .venv
@@ -14,59 +22,46 @@ python -m pip install -r requirements.txt
 python -m streamlit run app.py --server.address 127.0.0.1
 ```
 
-The viewer starts with the included synthetic sample. Filter by market/type,
-select an event to see its spend windows and explanation, or upload your own
-media CSV and optional sales CSV. Download the findings as CSV.
+The viewer opens with the included sample. Filter the findings by market or event type, then select an event to see its chart and explanation. You can also upload CSV files and download the findings.
 
-Media requires `date`, `country_code`, `advertising_channel`, and
-`media_investment`. Spend must be numeric, finite, and non-negative. Missing
-spend values are rejected rather than interpreted as zero. `impressions` and
-`clicks` are optional. Sales requires `date`, `country_code`, and `turnover`.
-Campaign rows are aggregated by country/channel/day; omitted dates are flagged
-as missing. All returned event dates are inclusive.
+## Use your own data
 
-## Verify the included sample
+| File | Required columns |
+|---|---|
+| Media CSV | `date`, `country_code`, `advertising_channel`, `media_investment` |
+| Sales CSV (optional) | `date`, `country_code`, `turnover` |
+
+Use dates such as `2024-06-24`. Media spend must be a finite, non-negative number; missing or invalid spend values are rejected. Media can also include `impressions` and `clicks`.
+
+Multiple campaign rows are summed for each day, market, and channel. Missing daily rows are flagged because a missing record does not prove that advertising stopped. Event start and end dates both belong to the reported window.
+
+## Check the results
+
+With the virtual environment active, run:
 
 ```bash
 python -m scripts.evaluate_sample
 python -m pytest -q -m "not slow"
 ```
 
-The revised detector finds all six configured sample events with no extra
-events: precision/recall/F1 are 1.0, including exact pulse component windows.
-This sample is a known regression fixture, **not an unseen benchmark**.
-The previous detector found five events, with three false positives and one
-missed grouped pulse (F1 0.7143).
+The revised detector finds all six events in the included sample, with no extra findings and exact pulse windows. Precision, recall, and F1 are all 1.0 on this sample. Because this is a known example used during development, it does **not** show how well the detector handles unseen data.
 
-Tests requiring the separately generated benchmark datasets or R are explicitly
-skipped when those resources are unavailable. The sample and synthetic unit
-tests run without R. The full benchmark CSVs are not included in this repository;
-see [benchmark/BENCHMARK.md](benchmark/BENCHMARK.md) for generation instructions.
-R also needs `siMMMulator`, `dplyr`, and `yaml`. The generator uses the Python
-interpreter that invokes it, so a second virtual environment is unnecessary.
-The historical sealed-test results and calibration remain archived and do not
-describe the revised detector. Do not overwrite the seal or represent a
-regenerated dataset as the original sealed run.
+The full benchmark CSVs are not included. Tests needing those files or R skip when they are unavailable. Running the viewer and sample checks does not require R. The saved final benchmark results describe an older detector, not the current version.
 
-## Scores and limits
+## What the scores mean
 
-Evidence/confidence and informativeness are heuristic scores in [0, 1], not
-probabilities or causal-effect estimates. The old constant calibration is not
-applied. Corrected evidence includes step sharpness and pulse-only corroboration.
-Overlapping events and censored boundaries reduce informativeness. Controls are
-conservative comparison candidates: a peer must remain active throughout the
-window, and sibling controls must actually exist and remain active.
+Each event has two scores from 0 to 1:
 
-Permanent budget changes are reported through the last observed date with a
-censoring caveat. A restart from zero alone is not enough to infer a permanent
-budget increase. Pulse grouping supports six or more pauses and separates
-unrelated long shutdowns; gaps shorter than seven days are not reported.
+- **Confidence:** how strongly the data matches the detected pattern. A score of 0.8 does not mean an 80% chance of being correct.
+- **Informativeness:** how useful the period might be for further analysis. Longer, clearer periods with possible comparison markets generally score higher.
 
-Still unvalidated: performance on real company data, causal comparability of
-controls, and whether the usefulness ranking improves marketing-effect
-estimation. Long near-zero periods can bias the active-spend baseline. Initial
-dormancy can be ambiguous between launch and missing prior history. In a
-two-channel market, a one-channel pause is labelled a holdout.
+These are rule-based scores. They do not measure the sales caused by advertising. A comparison market is only a candidate; the detector does not prove it is a fair control group.
 
-See [detection/README.md](detection/README.md) for the pipeline structure and
-[benchmark/eval/README.md](benchmark/eval/README.md) for evaluation conventions.
+Pauses shorter than seven days are not reported. Events touching the start or end of the data may continue beyond what we can see. Overlapping events are harder to interpret. Long periods of very low spend can distort the estimate of normal spend, and an initially inactive channel may be a late launch or simply have missing earlier history. Real company data and the usefulness of the ranking still need validation.
+
+## Read more
+
+- [How detection works](detection/README.md)
+- [Benchmark data and setup](benchmark/BENCHMARK.md)
+- [How evaluation works](benchmark/eval/README.md)
+- [Generate a new sample](synthetic_data_generator/README.md)

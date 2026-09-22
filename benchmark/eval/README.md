@@ -1,70 +1,64 @@
-# The Evaluation Harness
+# Evaluating the detector
 
-This scores a detector against the frozen benchmark. The team built and tested it before any real detector existed. It could not be tuned to flatter a result it had not yet seen.
+Evaluation compares detected events with known events in synthetic data. It checks both whether the right pattern was found and whether its dates overlap the expected window.
 
-## How to run it
+## Run a check
+
+For the included sample, run from the repository folder with the Python environment active:
 
 ```bash
-# Free to run as often as you like. Every run is added to dev_history.jsonl.
-python -m benchmark.eval.run_dev --detector benchmark.eval.adapter:detect --load-data
+python -m scripts.evaluate_sample
+```
 
-# The sealed test split. Run this ONCE, at the very end.
+For the larger development split, first follow the [benchmark setup](../BENCHMARK.md#get-data-ready), then run:
+
+```bash
+python -m benchmark.eval.run_dev --detector benchmark.eval.adapter:detect --load-data
+```
+
+You can repeat development runs. Each run is added to `dev_history.jsonl`.
+
+## How events match
+
+A finding must have the correct event type, market, and channel. Its dates must also overlap the expected dates enough to count as a match.
+
+The overlap measure is **intersection over union (IoU)**: the number of days shared by both windows divided by the number of days covered by either window. For example, 10 shared days out of 15 total days gives an IoU of 0.67. The matching threshold is 0.5.
+
+The matcher takes the strongest overlaps first. Each finding can match only one expected event, and each expected event can match only one finding.
+
+| Metric | Plain-language meaning |
+|---|---|
+| Precision | Of the events reported, how many matched an expected event? |
+| Recall | Of the expected events, how many were found? |
+| F1 | A combined score that rewards both precision and recall. |
+| Boundary error | How far the reported start and end dates are from the expected dates. |
+| Null-scenario false positives | How often the detector reports events in data with no inserted events. |
+
+Read the metrics together: finding nothing avoids false alarms but also misses every event. Built-in test detectors with perfect, empty, shifted, and incorrect answers check the evaluator's behavior.
+
+## Date and grouping rules
+
+- **Dates:** both ends of an evaluation window are inclusive. Truth comes from `scenario.json`, converting the exclusive `end_day` to the last affected day. The legacy truth CSV uses a different end-date convention.
+- **Pulses:** several off-windows are grouped into one pulse event. Standard overlap scoring uses the group's outer window, so a good score alone does not prove each pause is correct. The sample check also verifies individual pulse windows.
+- **Global pauses:** these are evaluated as `dark_period` events; the detector can add a `global_pause` tag.
+- **Staggered launches:** return one event per affected market, rather than one event for all markets.
+
+## Interpret the results
+
+Scenario breakdowns compare groups such as event family or noise level. Event breakdowns report recall by duration, magnitude, and zero versus near-zero spend. They do not report precision because an unmatched finding has no truth event to assign it to.
+
+These are descriptive comparisons. Some settings vary together, and simulated noise mainly affects sales and media response. A breakdown does not isolate the effect of one setting or establish robustness to noisy spend.
+
+Current confidence scores are heuristics, not probabilities. The adapter leaves probability confidence unset, so probability reliability curves are unavailable for this detector.
+
+## Final evaluation and historical results
+
+The final command is intended for the end of development, once the original sealed test files are available:
+
+```bash
 python -m benchmark.eval.run_final --detector benchmark.eval.adapter:detect --load-data --finalize
 ```
 
-A detector is any function with the shape `(media_df, sales_df, sid) -> list[Event]`.
+It verifies the seal and appends a record to `final_runs.jsonl`, including hashes of the detector code and scenario specification. Repeating it creates another record; the flag does not enforce a single lifetime run. Preserve the original records and seal.
 
-## Why you can trust the score
-
-`tests/eval/test_baseline.py` checks this every time the test suite runs. A perfect detector must score exactly 1.0 on precision, recall, F1, IoU, channel accuracy, market accuracy, and day-level F1 across the whole dev split. If that check ever fails, the harness can no longer tell a correct detector from a broken one. Nothing it reports can be trusted after that.
-
-A few built-in detectors prove the harness measures what it claims to measure:
-
-| Detector | What it proves |
-|---|---|
-| `perfect_oracle` | The harness recognizes a correct detector. |
-| `never_detect` | A detector that finds nothing still gets a perfect false-positive rate. FP rate alone is not enough to judge a detector. |
-| `detect_everything` | Reporting everything destroys precision and the null-scenario FP rate. |
-| `ungrouped_pulse_oracle` | Checks that the detector groups pulse events correctly (see below). |
-| `panel_launch_oracle` | Checks that staggered launches are split per market (see below). |
-| `shifted_oracle(n)` | Checks that IoU and boundary error respond to a shifted event window. |
-| `wrong_channel_oracle` | Checks that a wrong channel shows up as a channel error, not just a missed event. |
-
-**`never_detect` and `detect_everything` score identically on precision, recall, and F1: 0.000 for both.** One detector finds nothing, and the other finds everything. Only the null-scenario false-positive rate tells them apart. Never read F1 alone on this benchmark. A detector that sees events everywhere looks exactly as bad as one that finds nothing.
-
-## Three things that can silently score a good detector as zero
-
-The benchmark's ground truth and a detector's expected output do not always match shape. If a detector or its loader misses one of these, a correct detector can score zero without any error message.
-
-1. **Pulse trains.** The ground truth has one row per individual off-window. A detector should emit one grouped event per pulse train. An ungrouped detector, emitting one event per window, matches no single truth row. A perfect pulse detector would then score zero on a third of the test split. The loader already groups the truth rows to match.
-2. **`global_pause`.** The ground truth calls this pattern type `global_pause`. The detector should label it `dark_period` and add a `global_pause` tag. The loader already relabels it.
-3. **`staggered_launch`.** The ground truth has one row per market that turned the channel on late. A detector must emit one event **per market**, each carrying that market's country code, rather than a single event for the whole panel. The loader does not do this one for you. A detector that emits one panel-wide event scores 0.000 on every staggered launch, 16 of the 127 matchable test events. `panel_launch_oracle` exists to catch this mistake.
-
-Event end dates come from `scenario.json`'s `end_day` field, never from the CSV's `end_date` column, which uses a different convention.
-
-## Breakdowns
-
-The benchmark can slice results in two ways:
-
-| Function | Slices by | Based on |
-|---|---|---|
-| `breakdowns` | Noise level, event family, country count, channel count, years, trend, market spread | Whole scenarios |
-| `event_breakdowns` | Duration, magnitude, exact-zero vs. near-zero | Individual events |
-
-Event-level breakdowns show recall only. A false positive does not belong to any truth event, so there is nothing to compute precision against.
-
-**Only trust the `noise_level` breakdown as a real effect.** The generator ties `trend_p` and `market_spread` to event family on both splits. A number reported against either one really measures family difficulty, not that axis.
-
-## The one-shot final run
-
-`run_final.py` refuses to run without `--finalize`. It checks the test split's seal before reading anything. Then it records a SHA-256 hash of every Python file under `detection/`, plus the sealed spec hash, to `final_runs.jsonl`. You can run it more than once, but every run after the first stays permanently visible in that file.
-
-`run_final.py` writes that record before it renders the report. A typo in `--out` cannot spend your one run without leaving a trace.
-
-## Revised detector versus historical results
-
-The committed final-run log describes the earlier detector. It has not been
-rerun or overwritten after the correctness changes. The revised detector uses
-uncalibrated heuristic scores, so its adapter leaves probability confidence
-unset and reliability curves are unavailable. Use `python -m scripts.evaluate_sample`
-for a reproducible check on the included CSVs; this is not a new held-out score.
+The committed final-run log describes an older detector. It has not been rerun for the correctness fixes. The current sample result is a regression check, not a replacement for an unseen test result.
