@@ -26,8 +26,8 @@ windows that the regime pass would otherwise report a second time:
 - a step episode overlapping any notable off-run of its own channel is the
   level shift that the off-run already explains, and is dropped.
 
-A step episode with no matching reversal is dropped as well; its end is the
-series end by construction rather than by measurement. See _step_events.
+A step with no observed reversal is reported through the last observed day,
+with censored_end evidence rather than an asserted closing date.
 """
 from __future__ import annotations
 
@@ -109,21 +109,14 @@ def _inside_a_pulse(spans: dict[str, list[Span]], channel: str,
 
 def _pulse_events(panel: Panel, country: str, sid: str, channels: list[str],
                   ) -> tuple[list[DetectedEvent], dict[str, list[Span]]]:
-    """Pulse trains, plus the span each one claims, per channel.
-
-    find_pulse_trains deliberately merges every notable off-run on a series
-    into ONE train however far apart the runs sit, and this layer must not
-    re-split it: the truth for a pulsing channel is grouped the same way, so a
-    detector emitting one event per off-window scores an overlap far below the
-    matcher's threshold and matches nothing at all.
-    """
+    """Pulse trains and the individual off-windows they claim, per channel."""
     events: list[DetectedEvent] = []
     spans: dict[str, list[Span]] = {}
     for ch in channels:
         runs = find_off_runs(panel.series(country, ch),
                              panel.present_mask(country, ch))
         for train in find_pulse_trains(runs):
-            spans.setdefault(ch, []).append((train.start, train.end))
+            spans.setdefault(ch, []).extend(train.components)
             events.append(DetectedEvent(
                 sid=sid, country_code=country, channel=ch,
                 event_type="channel_pulse", start=train.start, end=train.end,
@@ -149,7 +142,7 @@ def _step_events(panel: Panel, country: str, sid: str,
         off_windows = [(r.start, r.end) for r
                        in find_off_runs(panel.series(country, ch),
                                         panel.present_mask(country, ch))
-                       if r.notable]
+                       if r.n_days >= params.MIN_DAYS]
         for ep in find_step_episodes(panel.series(country, ch),
                                      exclude=off_windows):
             # No MIN_DAYS floor here, and none is reachable: find_level_shifts
@@ -162,24 +155,22 @@ def _step_events(panel: Panel, country: str, sid: str,
             # pinned in tests/detection/test_label.py.
             if any(_overlaps(w, ep.start, ep.end) for w in off_windows):
                 continue
-            if ep.open_ended:
-                # An episode with no matching reversal runs to the last
-                # observed day BY CONSTRUCTION, not by measurement. Reporting
-                # it asserts an extent this layer never established, and on the
-                # development split every such episode overlapped its window so
-                # loosely that none of them could match anything -- while each
-                # one still cost a false positive. Four of them did sit on a
-                # real step; each was missed because find_level_shifts never
-                # detected the CLOSING shift, and the opening shift was dated
-                # correctly. That is a recall defect one layer down, and
-                # guessing a duration here to cover it would hide the defect
-                # behind a number nothing measured. See the Task 7 report.
+            # A restart from zero has no established prior active level to
+            # compare. Without a reversal, do not call normal resumed spending
+            # a permanent budget change.
+            if ep.open_ended and ep.ratio is None:
+                continue
+            # Initial launches are not budget changes from an observed active level.
+            if ep.ratio is None and any(lo == panel.dates[0] for lo, hi in off_windows
+                                        if hi <= ep.start <= hi + pd.Timedelta(days=params.ROLLING)):
                 continue
             events.append(DetectedEvent(
                 sid=sid, country_code=country, channel=ch,
                 event_type="step_change", start=ep.start, end=ep.end,
                 magnitude_ratio=ep.ratio,
-                evidence={"z": ep.z, "rose_from_zero": ep.ratio is None},
+                evidence={"z": ep.z, "sharpness": ep.sharpness,
+                          "rose_from_zero": ep.ratio is None,
+                          "censored_end": ep.open_ended},
             ))
     return events
 
@@ -201,6 +192,8 @@ def label_market(panel: Panel, country: str, sid: str) -> list[DetectedEvent]:
         off = all_channels - regime.active
 
         if not regime.active:
+            if all(_inside_a_pulse(pulse_spans, ch, regime) for ch in off):
+                continue
             events.append(DetectedEvent(
                 sid=sid, country_code=country, channel=None,
                 event_type="dark_period", start=regime.start, end=regime.end,

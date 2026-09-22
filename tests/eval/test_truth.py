@@ -7,12 +7,14 @@ from benchmark.eval import truth as T
 from benchmark.eval.model import NON_EVENT_TYPES
 
 
+@pytest.mark.benchmark_data
 def test_lists_all_dev_scenarios():
     sids = T.list_scenarios("dev")
     assert len(sids) == 45
     assert sids[0] == "dev_001" and sids[-1] == "dev_045"
 
 
+@pytest.mark.benchmark_data
 def test_meta_carries_the_breakdown_axes():
     m = T.load_meta("dev", "dev_001")
     assert m["sid"] == "dev_001"
@@ -21,12 +23,14 @@ def test_meta_carries_the_breakdown_axes():
         assert key in m
 
 
+@pytest.mark.benchmark_data
 def test_null_scenarios_load_zero_events():
     for sid in T.list_scenarios("dev"):
         if T.load_meta("dev", sid)["family"] == "null":
             assert T.load_truth("dev", sid) == []
 
 
+@pytest.mark.benchmark_data
 def test_intervals_are_inclusive_and_derived_from_end_day():
     """BENCHMARK.md: end_date in the CSV is slice-exclusive EXCEPT where it is
     clamped at the series end. We sidestep that entirely by taking end_day from
@@ -55,6 +59,7 @@ def test_intervals_are_inclusive_and_derived_from_end_day():
                     assert e.end == expected_end, sid
 
 
+@pytest.mark.benchmark_data
 def test_censored_end_reaches_the_last_day_of_the_series():
     """dev_037 is the censored_end edge case and is one of the four scenarios
     where the CSV's end_date is already inclusive. Getting this wrong shortens
@@ -66,6 +71,7 @@ def test_censored_end_reaches_the_last_day_of_the_series():
         f"no event reaches {last_day.date()}"
 
 
+@pytest.mark.benchmark_data
 def test_pulse_rows_are_grouped_into_one_event_per_country_channel():
     """THE critical reconciliation. dev_019 has four 14-day pulse rows; the
     detector emits ONE grouped event. Ungrouped, a perfect pulse detector scores
@@ -82,6 +88,7 @@ def test_pulse_rows_are_grouped_into_one_event_per_country_channel():
                for a, b in p.components)
 
 
+@pytest.mark.benchmark_data
 def test_pulse_grouping_is_per_country_channel_not_per_scenario():
     """Two pulse trains on different channels must stay two events."""
     for sid in T.list_scenarios("dev"):
@@ -91,12 +98,14 @@ def test_pulse_grouping_is_per_country_channel_not_per_scenario():
         assert len(keys) == len(set(keys)), f"{sid}: duplicate pulse group"
 
 
+@pytest.mark.benchmark_data
 def test_negative_controls_are_excluded_from_matchable_truth():
     for sid in T.list_scenarios("dev"):
         for e in T.load_truth("dev", sid):
             assert e.event_type not in NON_EVENT_TYPES, sid
 
 
+@pytest.mark.benchmark_data
 def test_negative_controls_are_available_separately():
     """They must be loadable, because a detection inside one is a false
     positive and the reporting needs to say so."""
@@ -108,6 +117,7 @@ def test_negative_controls_are_available_separately():
             assert e.event_type in NON_EVENT_TYPES
 
 
+@pytest.mark.benchmark_data
 def test_global_pause_is_relabelled_to_dark_period_and_tagged():
     found = False
     for sid in T.list_scenarios("dev"):
@@ -121,6 +131,7 @@ def test_global_pause_is_relabelled_to_dark_period_and_tagged():
     assert found, "no dev scenario carries a global_pause"
 
 
+@pytest.mark.benchmark_data
 def test_staggered_launch_is_fanned_out_per_market():
     """Convention chosen once and stated: the panel-level detector event is
     fanned out to one per market, so the section 9 matcher stays unchanged."""
@@ -134,6 +145,7 @@ def test_staggered_launch_is_fanned_out_per_market():
     assert found, "no dev scenario carries a staggered_launch"
 
 
+@pytest.mark.benchmark_data
 def test_multiplier_is_carried_from_scenario_json_not_the_csv():
     """ground_truth.csv blanks multiplier for everything except step_change, so
     magnitude breakdowns must come from scenario.json."""
@@ -146,12 +158,14 @@ def test_multiplier_is_carried_from_scenario_json_not_the_csv():
     assert any(0 < m < 0.1 for m in seen), "no near-zero magnitude"
 
 
+@pytest.mark.benchmark_data
 def test_every_matchable_event_has_a_positive_length():
     for sid in T.list_scenarios("dev"):
         for e in T.load_truth("dev", sid):
             assert e.n_days >= 1, (sid, e.pattern_id)
 
 
+@pytest.mark.benchmark_data
 def test_loader_never_touches_the_test_split_truth(monkeypatch):
     """A guard against the single worst accident this project can have.
 

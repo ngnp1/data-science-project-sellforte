@@ -120,16 +120,21 @@ def _corroboration(event: DetectedEvent, panel: Panel) -> float:
     channels = [ch for ch in subject_channels(event, panel) if ch]
     if not channels:
         return params.CORROBORATION_UNKNOWN
-    window = slice(event.start, event.end)
+    claimed = pd.Series(False, index=panel.dates)
+    for start, end in event.components or ((event.start, event.end),):
+        claimed.loc[start:end] = True
     scores = []
     for ch in channels:
         key = (event.country_code, ch)
         if key not in panel.impressions.columns:
             scores.append(params.CORROBORATION_UNKNOWN)
             continue
-        imps = panel.impressions.loc[window, key]
+        imps = panel.impressions.loc[claimed, key]
+        if imps.isna().any():
+            scores.append(params.CORROBORATION_UNKNOWN)
+            continue
         total = float(np.nansum(imps.values))
-        outside = panel.impressions[key].drop(panel.impressions.loc[window].index)
+        outside = panel.impressions.loc[~claimed, key]
         if float(np.nansum(outside.values)) <= 0:
             # This series never reports impressions at all; silence inside the
             # window corroborates nothing.
@@ -245,7 +250,9 @@ def _duration_adequacy(event: DetectedEvent) -> float:
     params.ADSTOCK_WINDOWS_FOR_FULL_CREDIT half-lives.
     """
     span = params.ADSTOCK_HALF_LIFE * params.ADSTOCK_WINDOWS_FOR_FULL_CREDIT
-    return float(min(1.0, event.n_days / span))
+    days = (min((b - a).days + 1 for a, b in event.components)
+            if event.event_type == "channel_pulse" and event.components else event.n_days)
+    return float(min(1.0, days / span))
 
 
 def _contrast(event: DetectedEvent, panel: Panel) -> float:
@@ -316,6 +323,8 @@ def _sales_snr(event: DetectedEvent, panel: Panel) -> float:
     if len(trailing) < baseline_days:
         return params.SALES_SNR_UNKNOWN
     trailing = trailing.iloc[-baseline_days:]
+    if trailing.isna().any():
+        return params.SALES_SNR_UNKNOWN
     trailing_median = float(np.median(trailing.values))
     if trailing_median <= 0:
         return params.SALES_SNR_UNKNOWN
@@ -323,7 +332,7 @@ def _sales_snr(event: DetectedEvent, panel: Panel) -> float:
     sigma = max(params.MAD_TO_SIGMA * mad,
                params.SALES_SIGMA_FLOOR_FRAC * trailing_median)
     window = series.loc[event.start:event.end]
-    if window.empty:
+    if window.empty or window.isna().any():
         return params.SALES_SNR_UNKNOWN
     departure = abs(float(np.median(window.values)) - trailing_median)
     ratio = departure / sigma

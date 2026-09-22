@@ -8,6 +8,10 @@ from benchmark.eval import detectors_for_testing as D
 from benchmark.eval import truth as T
 from benchmark.eval.metrics import evaluate_scenario
 
+from pathlib import Path
+if not (Path(__file__).resolve().parents[2] / "benchmark/datasets/dev/dev_001/media.csv").exists():
+    pytest.skip("Generated benchmark datasets are not installed", allow_module_level=True)
+
 DEV_WITH_EVENTS = [sid for sid in T.list_scenarios("dev")
                    if T.load_truth("dev", sid)]
 

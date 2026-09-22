@@ -190,15 +190,7 @@ def _rank_off_run(panel: Panel, country: str | None, channel: str | None,
 
 
 def _control_sentence(event: DetectedEvent, subjects: list[str]) -> str | None:
-    """Describes the control group honestly for however many channels this
-    event actually claims -- a dark_period's subjects are every channel in
-    the market, and saying "this channel" (singular) about it would be a
-    claim the export cannot back up. The cross-market layer's own rule (see
-    detection/compose/cross_market.py's _peer_status) counts a peer as
-    "running" if it kept even ONE subject channel alive, not necessarily
-    all of them, so the multi-channel wording says "at least one of" rather
-    than implying every peer ran every one of this market's channels.
-    """
+    """Describe candidate controls established by the cross-market layer."""
     control = event.evidence.get("control_available")
     if control is None:
         return None
@@ -227,7 +219,7 @@ def _control_sentence(event: DetectedEvent, subjects: list[str]) -> str | None:
                 "throughout, so they are available as a control.")
     if control == "sibling_channels":
         what = single or "these channels"
-        return (f"No peer market ran {what}; the market's other channels "
+        return (f"No peer market ran {what} throughout; the market's other channels "
                 f"are the only available control.")
     if control == "none":
         return "No control group is available for this window."
@@ -451,13 +443,19 @@ def explain(event: DetectedEvent, panel: Panel) -> str:
     control_sentence = _control_sentence(event, subjects)
     if control_sentence:
         parts.append(control_sentence)
+        if event.evidence.get("control_available") != "none":
+            parts.append("These are comparison candidates; causal comparability has not been established.")
 
+    if event.evidence.get("censored_end"):
+        parts.append("The event was still ongoing at the end of the observed data; its true end is unknown.")
+    if event.evidence.get("censored_start"):
+        parts.append("The event touches the start of the observed data; earlier activity is unknown.")
     label = event.event_type
     if event.tags:
         label += " (" + ", ".join(event.tags) + ")"
     scored = []
     if event.detection_confidence is not None:
-        scored.append(f"confidence {event.detection_confidence:.2f}")
+        scored.append(f"heuristic confidence score {event.detection_confidence:.2f} (not a probability)")
     if event.informativeness is not None:
         scored.append(f"informativeness {event.informativeness:.2f}")
     scored.append(f"validity {event.validity}")

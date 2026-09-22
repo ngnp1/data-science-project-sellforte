@@ -1,8 +1,8 @@
-"""Peer-market comparison: what control group, if any, does an event have?
+"""Peer-market comparison: identify potential comparison groups.
 
 This layer decides an event's worth more than anything about its own shape. A
-holdout whose peers kept running has a ready-made control group and is the most
-MMM-valuable finding the system can produce. The same holdout with every peer
+holdout whose peers kept running has a potential comparison group; causal comparability still needs
+analyst validation. The same holdout with every peer
 also off has no control at all -- and looks exactly like a pipeline outage.
 
 Two rules govern which peers get a vote:
@@ -74,10 +74,10 @@ def _subject_channels(panel: Panel, event: DetectedEvent) -> list[str]:
 
 def _peer_status(panel: Panel, country: str, channels: list[str],
                  start: pd.Timestamp, end: pd.Timestamp) -> tuple[int, int]:
-    """(peers running normally, peers also off) over the window.
+    """Count peers continuously active and peers continuously off.
 
-    A peer counts as off only if EVERY subject channel it runs was off for the
-    whole window; one live day on one channel makes it a control.
+    Partial-window activity or missing rows qualifies as neither. A running
+    peer must carry every subject channel throughout the event window.
     """
     running = off = 0
     for peer in panel.countries:
@@ -90,15 +90,17 @@ def _peer_status(panel: Panel, country: str, channels: list[str],
             # neither for nor against a control group. It abstains.
             continue
         peer_off = True
+        peer_running = len(subject) == len(channels)
         for ch in subject:
             mask = off_mask(panel.series(peer, ch),
                             panel.present_mask(peer, ch))
-            if not mask.loc[start:end].all():
-                peer_off = False
-                break
+            window = mask.loc[start:end]
+            known = panel.present_mask(peer, ch).loc[start:end]
+            peer_off = peer_off and bool(window.all() and known.all())
+            peer_running = peer_running and bool((~window).all() and known.all())
         if peer_off:
             off += 1
-        else:
+        elif peer_running:
             running += 1
     return running, off
 
@@ -118,13 +120,19 @@ def annotate(events: list[DetectedEvent], panel: Panel) -> list[DetectedEvent]:
             control = "peers"
             if e.event_type == "natural_holdout":
                 tags.append("cross_market_holdout")
-        elif peers_off > 0:
+        elif peers_off > 0 and peers_off == sum(
+                bool(set(_subject_channels(panel, e)) & set(panel.channels_in(peer)))
+                for peer in panel.countries if peer != e.country_code):
             control = "none"
             tags.append("global_pause")
         else:
-            # No peers carry these channels at all; the market's other
-            # channels are the only available control.
-            control = "sibling_channels"
+            # No continuously active peer is available. Only credit siblings
+            # that actually exist and stay active throughout the window.
+            siblings = set(panel.channels_in(e.country_code)) - set(_subject_channels(panel, e))
+            healthy = any(not off_mask(panel.series(e.country_code, ch),
+                          panel.present_mask(e.country_code, ch)).loc[e.start:e.end].any()
+                          for ch in siblings)
+            control = "sibling_channels" if healthy else "none"
 
         evidence = dict(e.evidence)
         evidence.update(control_available=control, peers_running=running,
@@ -176,12 +184,15 @@ def find_staggered_launches(panel: Panel, sid: str) -> list[DetectedEvent]:
             if first_active == earliest:
                 continue
             idx = panel.dates.get_loc(first_active)
+            running, _ = _peer_status(panel, country, [channel], panel.dates[0], panel.dates[idx - 1])
             out.append(DetectedEvent(
                 sid=sid, country_code=country, channel=channel,
                 event_type="staggered_launch", start=panel.dates[0],
                 end=panel.dates[idx - 1],
-                tags=("cross_market_control",),
-                evidence={"onset": str(first_active.date()),
+                tags=("cross_market_control",) if running else (),
+                evidence={"control_available": "peers" if running else "none",
+                          "peers_running": running, "censored_start": True,
+                          "onset": str(first_active.date()),
                           "earliest_market_onset": str(earliest.date()),
                           "n_markets": len(onsets)},
             ))

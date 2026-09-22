@@ -89,16 +89,15 @@ def test_a_peer_that_never_ran_the_channel_is_not_a_control():
     assert holdout.evidence["peers_off"] == 0
 
 
-def test_a_peer_off_for_only_part_of_the_window_is_still_a_control():
-    """A peer has to be off for the WHOLE window to lose its control status:
-    a peer that ran for most of the window still carries the contrast."""
+def test_a_peer_off_for_only_part_of_the_window_is_not_a_peer_control():
+    """A partially inactive peer is not a control; an active sibling can be."""
     p = build({
         "DE": {"TV": [100] * 40 + [0] * 20 + [100] * 40, "Radio": [50] * 100},
         "AT": {"TV": [100] * 40 + [0] * 10 + [100] * 50, "Radio": [50] * 100},
     })
     holdout = [e for e in annotate(label_market(p, "DE", "dev_test"), p)
                if e.event_type == "natural_holdout"][0]
-    assert holdout.evidence["control_available"] == "peers"
+    assert holdout.evidence["control_available"] == "sibling_channels"
     assert "global_pause" not in holdout.tags
 
 

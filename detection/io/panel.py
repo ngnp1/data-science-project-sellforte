@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 
 
@@ -61,20 +62,33 @@ def _pivot(df: pd.DataFrame, values: str, dates: pd.DatetimeIndex,
            fill: float) -> pd.DataFrame:
     wide = df.pivot_table(index="date", columns=["country_code",
                                                  "advertising_channel"],
-                          values=values, aggfunc="sum")
+                          values=values, aggfunc=lambda x: x.sum(min_count=1))
     return wide.reindex(dates).fillna(fill)
 
 
 def build_panel(media_df: pd.DataFrame, sales_df: pd.DataFrame | None = None,
                 sid: str = "") -> Panel:
+    required = {"date", "country_code", "advertising_channel", "media_investment"}
+    missing = required - set(media_df.columns)
+    if missing:
+        raise ValueError(f"Missing media columns: {', '.join(sorted(missing))}")
     media = media_df.copy()
+    spend_values = pd.to_numeric(media["media_investment"], errors="coerce")
+    if (~np.isfinite(spend_values) | (spend_values < 0)).any():
+        raise ValueError("media_investment must contain finite, non-negative values; unknown spend is not zero")
+    if media[["date", "country_code", "advertising_channel"]].isna().any().any():
+        raise ValueError("Media dates, countries and channels must not be missing")
+    media["media_investment"] = spend_values
+    for column in ("impressions", "clicks"):
+        if column not in media:
+            media[column] = float("nan")
     media["date"] = pd.to_datetime(media["date"])
 
     dates = pd.date_range(media["date"].min(), media["date"].max(), freq="D")
 
     spend = _pivot(media, "media_investment", dates, 0.0)
-    impressions = _pivot(media, "impressions", dates, 0.0)
-    clicks = _pivot(media, "clicks", dates, 0.0)
+    impressions = _pivot(media, "impressions", dates, float("nan"))
+    clicks = _pivot(media, "clicks", dates, float("nan"))
 
     # Presence is counted BEFORE any fill, so a row that existed with spend 0.0
     # is distinguishable from a row that never existed at all.
@@ -97,8 +111,8 @@ def build_panel(media_df: pd.DataFrame, sales_df: pd.DataFrame | None = None,
         sales = sales_df.copy()
         sales["date"] = pd.to_datetime(sales["date"])
         sales = (sales.pivot_table(index="date", columns="country_code",
-                                   values="turnover", aggfunc="sum")
-                 .reindex(dates).fillna(0.0))
+                                   values="turnover", aggfunc=lambda x: x.sum(min_count=1))
+                 .reindex(dates))
     else:
         sales = pd.DataFrame(index=dates)
 

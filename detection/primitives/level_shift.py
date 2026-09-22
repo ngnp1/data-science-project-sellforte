@@ -74,6 +74,7 @@ class StepEpisode:
     ratio: float | None      # None when the level before the shift was zero
     z: float
     open_ended: bool
+    sharpness: float = 0.0
 
 
 def _robust_sigma(values: np.ndarray) -> float:
@@ -265,10 +266,10 @@ def find_step_episodes(
             used.update({i, partner})
             episodes.append(StepEpisode(
                 start=up.at, end=s.index[other.index - 1], ratio=up.ratio,
-                z=up.z, open_ended=False))
+                z=up.z, open_ended=False, sharpness=up.sharpness))
         else:
             used.add(i)
             episodes.append(StepEpisode(
                 start=up.at, end=s.index[-1], ratio=up.ratio, z=up.z,
-                open_ended=True))
+                open_ended=True, sharpness=up.sharpness))
     return episodes

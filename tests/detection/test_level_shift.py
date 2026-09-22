@@ -1,3 +1,4 @@
+import pytest
 import pathlib
 
 import numpy as np
@@ -447,6 +448,7 @@ def test_no_shift_is_found_on_a_battery_of_series_with_no_level_change():
                 f"{[(sh.index, round(sh.z, 2)) for sh in found]}")
 
 
+@pytest.mark.benchmark_data
 def test_the_benchmarks_own_blocked_ramp_emits_no_step():
     """THE ramp defence, on the benchmark's own gradual ramp rather than a
     synthetic stand-in.

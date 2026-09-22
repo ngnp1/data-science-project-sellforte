@@ -32,6 +32,7 @@ def load(sid):
     return media, sales
 
 
+@pytest.mark.benchmark_data
 def test_runs_end_to_end_on_a_real_scenario():
     media, sales = load("dev_005")
     events = run_detection(media, sales, "dev_005")
@@ -39,6 +40,7 @@ def test_runs_end_to_end_on_a_real_scenario():
     assert all(e.event_type in EVENT_TYPES for e in events)
 
 
+@pytest.mark.benchmark_data
 def test_finds_the_injected_dark_period_in_dev_005():
     """dev_005 injects a dark period in FR from 2024-12-18 for 14 days. The
     detector sees only spend, and must find it."""
@@ -52,6 +54,7 @@ def test_finds_the_injected_dark_period_in_dev_005():
     assert abs((e.end - pd.Timestamp("2024-12-31")).days) <= 2
 
 
+@pytest.mark.benchmark_data
 def test_reports_nothing_on_a_null_scenario():
     """dev_001 carries no events at all. Anything reported is a false positive,
     and null scenarios are the only way to measure a false-positive rate."""
@@ -59,6 +62,7 @@ def test_reports_nothing_on_a_null_scenario():
     assert run_detection(media, sales, "dev_001") == []
 
 
+@pytest.mark.benchmark_data
 def test_every_interval_is_inclusive_and_ordered():
     media, sales = load("dev_019")
     for e in run_detection(media, sales, "dev_019"):
@@ -66,6 +70,7 @@ def test_every_interval_is_inclusive_and_ordered():
         assert e.n_days >= 1
 
 
+@pytest.mark.benchmark_data
 def test_sales_do_not_participate_in_detection():
     """The module docstring claims detection runs on SPEND ONLY. That is a
     causal claim about this pipeline, so it is asserted rather than repeated:
@@ -98,6 +103,7 @@ def test_sales_do_not_participate_in_detection():
            [identity(e) for e in without_sales]
 
 
+@pytest.mark.benchmark_data
 def test_the_sales_frame_reaches_the_panel():
     """Sales does not participate in DETECTION (see above), but the module
     docstring also claims it is carried onto the panel for a later scoring
@@ -126,6 +132,7 @@ def test_the_sales_frame_reaches_the_panel():
     assert seen["panel_sales_columns"], "the panel carries no sales series"
 
 
+@pytest.mark.benchmark_data
 def test_no_duplicate_events():
     media, sales = load("dev_005")
     events = run_detection(media, sales, "dev_005")
@@ -134,6 +141,7 @@ def test_no_duplicate_events():
     assert len(keys) == len(set(keys))
 
 
+@pytest.mark.benchmark_data
 def test_a_pulse_train_stays_one_grouped_event():
     """dev_019 pulses DE/Affiliate four times. Truth for a pulsing channel is
     grouped into ONE interval by the harness's loader, so a pipeline that
@@ -170,44 +178,15 @@ def _flighting_frame(n_pulses, channels, n_on=20, n_off=10, country="DE"):
     return pd.DataFrame(rows)
 
 
-def test_a_six_window_train_fragments_into_separate_wrong_type_events():
-    """The SYSTEM-level consequence of the six-window pulse limitation.
-
-    tests/detection/test_pulse.py pins the primitives: at six regular windows
-    RUN_RATIO leaves no run notable, so P3 groups nothing. It is easy -- and
-    the handover report did it in four places -- to read that as "the train is
-    suppressed entirely" and "nothing is reported at all". It is not. Regime
-    segmentation cuts the timeline on the active-channel set and never asks P1
-    whether a run was notable, so every window still reaches the output; it
-    just arrives as N independent events carrying the wrong type, the wrong
-    span, and natural_holdout's lower TYPE_PRIOR instead of channel_pulse's.
-
-    Silence would be safe: an analyst who is told the detector goes quiet on
-    flighting data knows to look elsewhere. Fragmentation is not -- N
-    plausible-looking holdouts are triaged one by one and the
-    adstock-observability rationale that makes a pulse train worth finding is
-    silently lost. This test exists so the disclosure in REPORT.md cannot
-    quietly revert to the comfortable version.
-    """
-    five = run_detection(_flighting_frame(5, ["TV", "Radio"]), None, "syn")
-    assert [e.event_type for e in five] == ["channel_pulse"]
-    assert len(five[0].components) == 5
-
-    for n in (6, 7):
-        events = run_detection(_flighting_frame(n, ["TV", "Radio"]), None, "syn")
-        assert [e.event_type for e in events] == ["natural_holdout"] * n, (
-            f"{n} windows: expected {n} fragmented holdouts, got "
-            f"{[e.event_type for e in events]}")
-        assert all(e.components == () for e in events)
-        # Each fragment is ranked BELOW the single grouped pulse it should
-        # have been: the type prior is the whole difference.
-        assert all(e.informativeness < five[0].informativeness for e in events)
-
-    # A one-channel market reports the same train as dark periods instead.
-    one = run_detection(_flighting_frame(6, ["TV"]), None, "syn")
-    assert [e.event_type for e in one] == ["dark_period"] * 6
+def test_long_pulse_trains_do_not_fragment_or_duplicate_dark_windows():
+    for n in (5, 6, 7):
+        for channels in (["TV", "Radio"], ["TV"]):
+            events = run_detection(_flighting_frame(n, channels), None, "syn")
+            assert [e.event_type for e in events] == ["channel_pulse"]
+            assert len(events[0].components) == n
 
 
+@pytest.mark.benchmark_data
 def test_every_event_names_a_market():
     """A staggered launch is fanned out to one event per launching market. A
     panel-level event with country_code None matches no truth row at all --
@@ -327,6 +306,7 @@ def test_the_truth_guard_actually_fires(monkeypatch, vector):
         attempts[vector]()
 
 
+@pytest.mark.benchmark_data
 def test_the_truth_guard_still_allows_ordinary_reads(monkeypatch):
     """The negative half of the control: the guard must not simply block
     everything, or the black-box test above would pass on a detector that
@@ -336,6 +316,7 @@ def test_the_truth_guard_still_allows_ordinary_reads(monkeypatch):
     assert len(media)
 
 
+@pytest.mark.benchmark_data
 def test_the_detector_never_reads_ground_truth(monkeypatch):
     """The black-box guarantee, enforced at runtime rather than by inspection."""
     media, sales = load("dev_005")
@@ -352,6 +333,7 @@ def test_an_empty_media_frame_returns_no_events_rather_than_raising():
     assert run_detection(empty, None, "dev_test") == []
 
 
+@pytest.mark.benchmark_data
 def test_every_detected_event_carries_all_three_scores():
     media, sales = load("dev_005")
     events = run_detection(media, sales, "dev_005")
@@ -364,12 +346,14 @@ def test_every_detected_event_carries_all_three_scores():
         assert e.validity in {"ok", "suspect_data_gap", "suspect_tracking_loss"}
 
 
+@pytest.mark.benchmark_data
 def test_every_detected_event_carries_an_explanation():
     media, sales = load("dev_005")
     for e in run_detection(media, sales, "dev_005"):
         assert len(e.explanation) > 40, e.event_type
 
 
+@pytest.mark.benchmark_data
 def test_events_can_be_ranked_by_informativeness():
     """The brief asks for ranking explicitly. If every event scores the same,
     ranking is decorative.

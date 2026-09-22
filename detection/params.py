@@ -251,3 +251,6 @@ SALES_SNR_UNKNOWN = 0.5
 # Calibration bins. Spec section 8 says deciles; fewer bins makes each estimate
 # steadier but the mapping coarser.
 CALIBRATION_BINS = 10
+
+# Separate pulse trains when their active gap exceeds this many off-window lengths.
+PULSE_MAX_GAP_MULT = 6

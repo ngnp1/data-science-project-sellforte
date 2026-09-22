@@ -6,10 +6,10 @@ This scores a detector against the frozen benchmark. The team built and tested i
 
 ```bash
 # Free to run as often as you like. Every run is added to dev_history.jsonl.
-python -m benchmark.eval.run_dev --detector detection.pipeline:run_detection
+python -m benchmark.eval.run_dev --detector benchmark.eval.adapter:detect --load-data
 
 # The sealed test split. Run this ONCE, at the very end.
-python -m benchmark.eval.run_final --detector detection.pipeline:run_detection --finalize
+python -m benchmark.eval.run_final --detector benchmark.eval.adapter:detect --load-data --finalize
 ```
 
 A detector is any function with the shape `(media_df, sales_df, sid) -> list[Event]`.
@@ -60,3 +60,11 @@ Event-level breakdowns show recall only. A false positive does not belong to any
 `run_final.py` refuses to run without `--finalize`. It checks the test split's seal before reading anything. Then it records a SHA-256 hash of every Python file under `detection/`, plus the sealed spec hash, to `final_runs.jsonl`. You can run it more than once, but every run after the first stays permanently visible in that file.
 
 `run_final.py` writes that record before it renders the report. A typo in `--out` cannot spend your one run without leaving a trace.
+
+## Revised detector versus historical results
+
+The committed final-run log describes the earlier detector. It has not been
+rerun or overwritten after the correctness changes. The revised detector uses
+uncalibrated heuristic scores, so its adapter leaves probability confidence
+unset and reliability curves are unavailable. Use `python -m scripts.evaluate_sample`
+for a reproducible check on the included CSVs; this is not a new held-out score.

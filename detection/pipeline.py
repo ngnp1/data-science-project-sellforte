@@ -32,7 +32,6 @@ from dataclasses import replace
 
 import pandas as pd
 
-from detection.calibrate import apply_calibration
 from detection.compose.cross_market import annotate, find_staggered_launches
 from detection.compose.label import label_market
 from detection.explain import explain
@@ -41,10 +40,8 @@ from detection.model import DetectedEvent
 from detection.score import confidence, informativeness
 from detection.validity import assess
 
-try:                                  # pragma: no cover - the frozen fit is
-    from detection.calibration_fit import KNOTS   # generated in Task 10
-except ImportError:                   # pragma: no cover
-    KNOTS = []
+# The historical calibration predates the current detector. Scores are raw
+# heuristics until an independent calibration set supports a new mapping.
 
 
 def run_detection(media_df: pd.DataFrame, sales_df: pd.DataFrame | None = None,
@@ -65,18 +62,28 @@ def run_detection(media_df: pd.DataFrame, sales_df: pd.DataFrame | None = None,
     events = annotate(events, panel)
     events.extend(find_staggered_launches(panel, sid))
 
-    scored = []
+    annotated = []
     for e in events:
+        overlapping = any(other is not e and other.country_code == e.country_code
+                          and other.start <= e.end and e.start <= other.end for other in events)
+        evidence = dict(e.evidence)
+        evidence.update(censored_start=e.start == panel.dates[0],
+                        censored_end=e.end == panel.dates[-1])
+        tags = tuple(dict.fromkeys((*e.tags, *(("confounded",) if overlapping else ()))))
+        annotated.append(replace(e, evidence=evidence, tags=tags))
+
+    scored = []
+    for e in annotated:
         raw, parts = confidence(e, panel)
         info, drivers = informativeness(e, panel)
         verdict, reasons = assess(e, panel)
         evidence = dict(e.evidence)
         evidence.update(confidence_sub_scores=parts,
                         informativeness_drivers=drivers,
-                        raw_confidence=raw)
+                        raw_confidence=raw, confidence_kind="heuristic")
         e = replace(
             e,
-            detection_confidence=apply_calibration(raw, KNOTS),
+            detection_confidence=raw,
             informativeness=info,
             validity=verdict,
             validity_reasons=reasons,

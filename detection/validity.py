@@ -32,17 +32,8 @@ OK = "ok"
 SUSPECT_DATA_GAP = "suspect_data_gap"
 SUSPECT_TRACKING_LOSS = "suspect_tracking_loss"
 
-# A step change never stops the channel, so the tracking-loss trigger -- whose
-# claim is "spend stopped but impressions did not" -- has no subject there.
-# The missing-rows trigger is a weaker fit for this exclusion: absent rows are
-# an export defect whatever the channel was doing, and a step episode with a
-# hole in it is still a hole. It is excluded here anyway, deliberately, because
-# widening it is a change to WHAT THE GATE REPORTS rather than a correction of
-# something it states falsely, and this branch does not add reach to a gate on
-# the way out the door. Documented as an open design question in REPORT.md §11
-# ("The missing-rows trigger excludes step changes deliberately").
-# tests/detection/test_validity.py pins the exclusion behaviourally, on a step
-# window that really does have missing rows.
+# Every event is checked for missing rows. Only stopping events are checked
+# for impressions continuing during stopped spend.
 _STOPPING_TYPES = frozenset({"dark_period", "single_channel", "natural_holdout",
                              "channel_pulse", "staggered_launch"})
 
@@ -55,9 +46,6 @@ def assess(event: DetectedEvent, panel: Panel) -> tuple[str, tuple[str, ...]]:
     """
     reasons: list[str] = []
     verdict = OK
-    if event.event_type not in _STOPPING_TYPES:
-        return verdict, ()
-
     channels = [ch for ch in subject_channels(event, panel) if ch]
     window = slice(event.start, event.end)
 
@@ -80,6 +68,9 @@ def assess(event: DetectedEvent, panel: Panel) -> tuple[str, tuple[str, ...]]:
                 f"missing rows rather than zero-spend rows -- the export may "
                 f"be omitting rows rather than reporting a real stop")
             verdict = SUSPECT_DATA_GAP
+
+    if event.event_type not in _STOPPING_TYPES:
+        return verdict, tuple(reasons)
 
     claimed = _claimed_mask(panel.dates, event)
     for ch in channels:

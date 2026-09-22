@@ -57,12 +57,14 @@ def test_to_event_carries_a_panel_wide_event_with_no_channel():
     assert e.n_days == 14
 
 
+@pytest.mark.benchmark_data
 def test_detect_returns_harness_events_for_a_real_scenario():
     media, sales = load("dev_005")
     events = detect(media, sales, "dev_005")
     assert events and all(isinstance(e, Event) for e in events)
 
 
+@pytest.mark.benchmark_data
 def test_detect_preserves_pulse_grouping():
     """One Event per pulse train, with its windows attached. Re-splitting a
     train here would push every pulse IoU below the matcher's threshold."""

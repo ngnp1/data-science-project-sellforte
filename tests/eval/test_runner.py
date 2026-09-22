@@ -1,7 +1,12 @@
+import pytest
 from benchmark.eval import detectors_for_testing as D
 from benchmark.eval import truth as T
 from benchmark.eval.report import render_markdown
 from benchmark.eval.runner import evaluate_split
+
+from pathlib import Path
+if not (Path(__file__).resolve().parents[2] / "benchmark/datasets/dev/dev_001/media.csv").exists():
+    pytest.skip("Generated benchmark datasets are not installed", allow_module_level=True)
 
 SOME = T.list_scenarios("dev")[:8]
 

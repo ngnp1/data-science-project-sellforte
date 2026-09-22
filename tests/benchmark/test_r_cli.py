@@ -76,3 +76,5 @@ def test_seed_changes_the_data_and_is_reproducible(generator_dir, tmp_path):
 
     assert outs[0] == outs[1], "same seed must reproduce byte-identically"
     assert outs[0] != outs[2], "different seed must produce different data"
+
+pytestmark = pytest.mark.requires_r

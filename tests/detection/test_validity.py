@@ -65,7 +65,7 @@ def test_a_verdict_lists_every_reason_that_fired():
     assert len(reasons) >= 2
 
 
-def test_a_step_change_is_not_assessed_for_missing_rows():
+def test_a_step_with_complete_rows_is_ok():
     """A step change never stops the channel, so there is no absence to
     explain and the gate must not invent one."""
     p = build({"TV": [100.0] * 75 + [300.0] * 75, "Radio": [50.0] * 150})
@@ -171,16 +171,8 @@ def test_an_exact_zero_event_still_says_spend_is_zero():
     assert "trickle" not in joined, joined
 
 
-def test_a_step_change_with_missing_rows_is_still_not_assessed():
-    """_STOPPING_TYPES, pinned on a fixture that can actually see it.
-
-    `test_a_step_change_is_not_assessed_for_missing_rows` above states this
-    intent but cannot prove it: its fixture has no missing rows at all, so the
-    `ok` verdict survives deleting the early return. This one gives the step
-    window 21 genuinely absent rows, which the missing-rows trigger would
-    report as a data gap were step_change not excluded -- so deleting the
-    guard turns this red.
-    """
+def test_a_step_change_with_missing_rows_is_flagged():
+    """Step windows with omitted rows must carry a data-gap warning."""
     n = 150
     dates = pd.date_range("2024-01-01", periods=n)
     rows = []
@@ -196,11 +188,10 @@ def test_a_step_change_with_missing_rows_is_still_not_assessed():
 
     verdict, reasons = assess(event(p, "TV", 75, 149, event_type="step_change",
                                     evidence={"z": 6.0}), p)
-    assert verdict == "ok", reasons
-    assert reasons == ()
+    assert verdict == "suspect_data_gap", reasons
+    assert reasons
 
-    # ... and the fixture really does contain the absence the guard is
-    # suppressing, so the assertion above is not passing by coincidence.
+    # The same absent dates also trigger the warning for a holdout.
     holdout = event(p, "TV", 80, 100, event_type="natural_holdout")
     assert assess(holdout, p)[0] == "suspect_data_gap"
 

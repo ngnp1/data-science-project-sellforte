@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -23,7 +24,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 GENERATOR_DIR = PROJECT_ROOT / "synthetic_data_generator"
 R_SCRIPT = GENERATOR_DIR / "generate_with_simmmulator.R"
 REFORMAT = GENERATOR_DIR / "reformat.py"
-VENV_PYTHON = GENERATOR_DIR / ".venv" / "bin" / "python"
+VENV_PYTHON = Path(sys.executable)
 DATASETS_DIR = PROJECT_ROOT / "benchmark" / "datasets"
 
 # What a detector is allowed to see.

@@ -57,7 +57,7 @@ Each primitive works on one channel's daily spend and finds a pattern in it. Non
 * **`score.py`** computes a confidence score, how sure the detector is, and an informativeness score, how useful the event is for analysis. Each score comes from several smaller signals.
 * **`validity.py`** checks an event for signs of a data problem rather than a real marketing event. Missing rows are one sign. A spend drop with no matching change in impressions is another.
 * **`explain.py`** turns one event into a plain-language sentence, stating what happened, when, and how it compares to that channel's normal spend.
-* **`calibrate.py`** adjusts the confidence score so it matches how often the detector is actually right. It learns this from results on the development split. `calibration_fit.py` stores the fitted result.
+* **`calibrate.py`** provides optional calibration utilities. `calibration_fit.py` retains the historical fit; the revised pipeline does not apply it. Current confidence values are explicitly labelled heuristic scores, not probabilities.
 
 ## Two files with no events in them
 
@@ -68,3 +68,21 @@ Each primitive works on one channel's daily spend and finds a pattern in it. Non
 
 * **`io/panel.py`** and **`io/normalize.py`** hold no detection logic. They only reshape and rescale the input data so the primitives can compare across channels and markets fairly.
 * **`calibration_fit.py`** holds no logic either. It is a generated file: the frozen output of one run of `calibrate.py` against the development split.
+
+## Current behavior and limitations
+
+Pulse trains group nearby pauses of similar length, independently of whether
+those pauses are unusual relative to one another. This supports long regular
+trains and prevents one unrelated shutdown from invalidating the whole pattern.
+A permanent budget change is emitted with `censored_end=True`; its observed
+window does not claim the actual change ended on the last available date.
+
+Unknown or negative spend is rejected. Absent rows retain a presence mask and
+produce validity warnings. Impressions and clicks are optional. Peer controls
+must remain active throughout the window, and sibling controls must exist and
+remain active. These are candidates for comparison, not proven causal controls.
+
+Scores now include measured step sharpness, pulse-component corroboration,
+overlap penalties and boundary censoring. The legacy constant calibration is
+archived; raw scores must not be interpreted as probabilities. The main README
+provides the local viewer, sample check, and current limitations.

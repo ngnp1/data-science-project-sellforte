@@ -71,56 +71,8 @@ def test_a_run_touching_the_series_edge_is_excluded_from_the_train():
     assert all(a != s(values).index[0] for a, _ in t.components)
 
 
-def test_a_regular_train_of_six_or_more_windows_produces_no_pulse_train():
-    """KNOWN LIMITATION, pinned so it cannot change unnoticed.
-
-    P1's intermittent guard and P3's pulse detector are in direct conflict, with
-    a hard cliff at exactly six windows. A run becomes notable only if it also
-    clears RUN_RATIO x p90 of the series' OTHER off-runs, and that rule switches
-    on once five other runs exist. In a regular train every other run is the
-    same length as this one, so p90 equals this run's own length and the floor
-    becomes RUN_RATIO times it. Nothing in a regular train ever clears that:
-    five windows work, six produce zero notable runs and no train at all.
-
-    WHAT THIS TEST DOES NOT SAY. It is about P1 and P3 -- `notable_runs` and
-    `find_pulse_trains` -- and nothing more. The pipeline does NOT fall silent
-    on such a train: regime segmentation in detection/compose/label.py cuts the
-    timeline on the active-channel set and never consults P1 notability, so
-    every window is still emitted, as a SEPARATE event OF THE WRONG TYPE.
-    Measured end to end on this fixture's shape: six windows produce six
-    natural_holdout events (or six dark_period events in a one-channel
-    market) and seven produce seven. The production risk is type error and
-    fragmentation, not silence -- see
-    tests/detection/test_pipeline.py::test_a_six_window_train_fragments_
-    into_separate_wrong_type_events, which pins the system-level behaviour
-    this test is often mistaken for.
-
-    The more regular and the more numerous the flighting pattern, the more
-    certainly the GROUPING is discarded -- while spec section 7 calls pulse
-    trains the only place adstock decay is observable and gives them the
-    highest informativeness weight.
-
-    The implementation is faithful to spec section 7 P1 as written; the conflict
-    is in the spec. It cannot fire on this benchmark, whose pulse family draws
-    2-4 windows, which is exactly why it is written down here: on real flighting
-    data it is the normal case, and no benchmark score can reveal it.
-    """
-    n_on, n_off = 20, 10
-    for n_pulses in (5, 6):
-        values = []
-        for _ in range(n_pulses):
-            values += [100.0] * n_on + [0.0] * n_off
-        values += [100.0] * n_on
-        series = s(values)
-        runs = notable_runs(series)
-        if n_pulses == 5:
-            assert len(runs) == 5, "a five-window train must still register"
-            assert find_pulse_trains(find_off_runs(series)), "expected a train"
-        else:
-            assert runs == [], (
-                "six regular windows: the ratio rule leaves no run notable, "
-                "so P3 never groups them -- the windows themselves are still "
-                "reported one by one, as the wrong event type, by the "
-                "pipeline. If this now passes, the spec conflict has been "
-                "resolved and this test should be replaced with the real "
-                "expectation.")
+def test_regular_trains_remain_grouped_regardless_of_run_notability():
+    for n in (5, 6, 12):
+        trains = find_pulse_trains(find_off_runs(pulsed(20, 10, n)))
+        assert len(trains) == 1
+        assert trains[0].n_pulses == n

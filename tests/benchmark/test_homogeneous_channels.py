@@ -56,3 +56,5 @@ def test_generator_succeeds_on_an_all_impression_scenario(tmp_path, generator_di
     assert "impressions_Instagram" in header
     # a genuinely all-impression run must carry no click-type columns
     assert "clicks_" not in header
+
+pytestmark = pytest.mark.requires_r

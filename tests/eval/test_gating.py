@@ -1,9 +1,10 @@
+import sys
 import json
 import pytest
 import subprocess
 from pathlib import Path
 
-PY = "synthetic_data_generator/.venv/bin/python"
+PY = sys.executable
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -26,6 +27,7 @@ def test_final_names_the_seal_check_in_its_help():
     assert "seal" in (p.stdout + p.stderr).lower()
 
 
+@pytest.mark.benchmark_data
 def test_dev_runs_freely_and_appends_history(tmp_path):
     """The dev split is free to run as often as you like, but the TEST must
     never write to the tracked benchmark/eval/dev_history.jsonl -- that file

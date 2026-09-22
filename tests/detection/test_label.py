@@ -91,11 +91,7 @@ def test_a_channel_off_only_at_the_start_is_not_a_holdout():
 
 
 def test_a_step_change_is_labelled_with_its_ratio():
-    """CHANGED FROM THE BRIEF. The brief's fixture stepped 100 -> 300 and never
-    came back, which this layer now declines to report (see
-    test_a_step_that_never_reverts_is_not_reported). Every step_change the
-    generator injects rises, holds and reverts, so the fixture is that shape
-    instead. The assertions are the brief's, unchanged."""
+    """A bounded threefold increase carries its observed budget ratio."""
     import numpy as np
     rng = np.random.default_rng(11)
     tv = (list(100 * (1 + rng.normal(0, 0.05, 120)))
@@ -225,11 +221,8 @@ def test_the_regime_length_floor_is_the_min_days_parameter():
     assert len(label_market(long_, "DE", "dev_test")) == 1
 
 
-def test_a_step_that_never_reverts_is_not_reported():
-    """A step with no matching reversal ends at the last observed day BY
-    CONSTRUCTION, which is an extent nothing measured. The primitive still
-    reports the episode -- so this pins the composition layer's own choice to
-    drop it, not the primitive's behaviour."""
+def test_a_step_that_never_reverts_is_reported_as_censored():
+    """An observed permanent budget change has an unknown closing date."""
     import numpy as np
     from detection.primitives.level_shift import find_step_episodes
     rng = np.random.default_rng(11)
@@ -242,8 +235,10 @@ def test_a_step_that_never_reverts_is_not_reported():
         "fixture no longer produces an open-ended episode, so this test would "
         "pass for the wrong reason")
 
-    assert [e for e in label_market(p, "DE", "dev_test")
-            if e.event_type == "step_change"] == []
+    steps = [e for e in label_market(p, "DE", "dev_test") if e.event_type == "step_change"]
+    assert len(steps) == 1
+    assert steps[0].end == p.dates[-1]
+    assert steps[0].evidence["censored_end"] is True
 
 
 def test_a_step_that_reverts_is_bounded():

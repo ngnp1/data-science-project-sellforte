@@ -81,7 +81,7 @@ def apply_calibration(score: float, knots) -> float:
     if not knots:
         return float(min(1.0, max(0.0, score)))
     for upper, value in knots:
-        if score <= upper:
+        if score < upper:
             return float(min(1.0, max(0.0, value)))
     # Above every knot's upper edge (only possible if the top bins had no
     # training data): hold flat at the last fitted value rather than
