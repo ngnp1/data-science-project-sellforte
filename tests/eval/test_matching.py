@@ -1,0 +1,218 @@
+import pandas as pd
+
+from benchmark.eval.matching import iou, match_events, overlap_days
+from benchmark.eval.model import Event
+
+
+def e(start, end, *, country="DE", channel="TV", etype="natural_holdout",
+      sid="dev_001"):
+    return Event(sid=sid, country_code=country, channel=channel,
+                 event_type=etype,
+                 start=pd.Timestamp(start), end=pd.Timestamp(end))
+
+
+def test_identical_intervals_have_iou_one():
+    assert iou(e("2024-03-01", "2024-03-10"), e("2024-03-01", "2024-03-10")) == 1.0
+
+
+def test_disjoint_intervals_have_iou_zero():
+    assert iou(e("2024-03-01", "2024-03-10"), e("2024-04-01", "2024-04-10")) == 0.0
+
+
+def test_adjacent_intervals_do_not_overlap():
+    """Inclusive intervals: [1..10] and [11..20] touch but share no day."""
+    assert overlap_days(e("2024-03-01", "2024-03-10"),
+                        e("2024-03-11", "2024-03-20")) == 0
+
+
+def test_iou_is_computed_on_inclusive_days():
+    # [1..10] vs [6..15]: overlap 5 days, union 15 days
+    got = iou(e("2024-03-01", "2024-03-10"), e("2024-03-06", "2024-03-15"))
+    assert abs(got - 5 / 15) < 1e-9
+
+
+def test_ungrouped_pulse_reproduces_the_documented_failure():
+    """BENCHMARK.md's worked example: a grouped 119-day detection against a
+    single 14-day truth window scores about 0.118 and cannot match at 0.5."""
+    grouped = e("2024-05-16", "2024-09-11")
+    single = e("2024-05-16", "2024-05-29")
+    assert abs(iou(grouped, single) - 14 / 119) < 0.01
+    assert iou(grouped, single) < 0.5
+
+
+def test_strict_match_requires_same_country_type_and_channel():
+    t = [e("2024-03-01", "2024-03-10")]
+    assert len(match_events(t, [e("2024-03-01", "2024-03-10")]).matches) == 1
+    assert not match_events(t, [e("2024-03-01", "2024-03-10", country="AT")]).matches
+    assert not match_events(t, [e("2024-03-01", "2024-03-10", channel="Radio")]).matches
+    assert not match_events(t, [e("2024-03-01", "2024-03-10",
+                                  etype="step_change")]).matches
+
+
+def test_relaxed_match_ignores_type_country_and_channel():
+    t = [e("2024-03-01", "2024-03-10")]
+    p = [e("2024-03-01", "2024-03-10", country="AT", channel="Radio",
+           etype="step_change")]
+    assert len(match_events(t, p, strict=False).matches) == 1
+
+
+def test_below_threshold_overlap_does_not_match():
+    t = [e("2024-03-01", "2024-03-10")]
+    p = [e("2024-03-09", "2024-03-20")]      # 2/20 = 0.1
+    assert not match_events(t, p).matches
+    assert len(match_events(t, p).unmatched_truth) == 1
+    assert len(match_events(t, p).unmatched_pred) == 1
+
+
+def test_matching_is_one_to_one_and_greedy_by_best_iou():
+    """Two predictions overlap one truth; only the better one may match."""
+    t = [e("2024-03-01", "2024-03-10")]
+    p = [e("2024-03-01", "2024-03-09"), e("2024-03-01", "2024-03-10")]
+    res = match_events(t, p)
+    assert len(res.matches) == 1
+    assert res.matches[0].iou == 1.0
+    assert len(res.unmatched_pred) == 1
+
+
+def test_each_truth_event_matches_at_most_once():
+    t = [e("2024-03-01", "2024-03-10"), e("2024-03-01", "2024-03-10")]
+    p = [e("2024-03-01", "2024-03-10")]
+    res = match_events(t, p)
+    assert len(res.matches) == 1
+    assert len(res.unmatched_truth) == 1
+
+
+def test_empty_inputs_are_handled():
+    assert match_events([], []).matches == []
+    assert len(match_events([e("2024-03-01", "2024-03-10")], []).unmatched_truth) == 1
+    assert len(match_events([], [e("2024-03-01", "2024-03-10")]).unmatched_pred) == 1
+
+
+def test_matching_is_deterministic_regardless_of_input_order():
+    """Determinism test with two parts: non-contending pairs and tied IoU."""
+    # Part 1: Two disjoint truth/pred pairs (no contention).
+    t = [e("2024-03-01", "2024-03-10"), e("2024-06-01", "2024-06-10")]
+    p = [e("2024-06-01", "2024-06-10"), e("2024-03-01", "2024-03-10")]
+    a = match_events(t, p)
+    b = match_events(list(reversed(t)), list(reversed(p)))
+    assert sorted(m.truth.start for m in a.matches) == \
+           sorted(m.truth.start for m in b.matches)
+
+    # Part 2: Tied IoU values must resolve identically regardless of input order.
+    # Reviewer's reproduction case: truth [Jan 1..10] vs two predictions that
+    # both score IoU 0.5: [Jan 1..5] and [Jan 6..10]. Must match the same one.
+    t_contention = [e("2024-03-01", "2024-03-10")]
+    p1 = e("2024-03-01", "2024-03-05")  # IoU = 5 / 10 = 0.5
+    p2 = e("2024-03-06", "2024-03-10")  # IoU = 5 / 10 = 0.5
+
+    res_p1_first = match_events(t_contention, [p1, p2])
+    res_p2_first = match_events(t_contention, [p2, p1])
+
+    # Both should match exactly one pair
+    assert len(res_p1_first.matches) == 1
+    assert len(res_p2_first.matches) == 1
+
+    # Same prediction must be credited in both orderings (deterministic)
+    assert res_p1_first.matches[0].pred.start == res_p2_first.matches[0].pred.start
+    assert res_p1_first.matches[0].pred.end == res_p2_first.matches[0].pred.end
+
+    # Also test with both lists reversed
+    res_reversed_both = match_events(list(reversed(t_contention)), [p2, p1])
+    assert len(res_reversed_both.matches) == 1
+    assert res_p1_first.matches[0].pred.start == res_reversed_both.matches[0].pred.start
+    assert res_p1_first.matches[0].pred.end == res_reversed_both.matches[0].pred.end
+
+
+def test_events_from_different_scenarios_never_match():
+    t = [e("2024-03-01", "2024-03-10", sid="dev_001")]
+    p = [e("2024-03-01", "2024-03-10", sid="dev_002")]
+    assert not match_events(t, p).matches
+
+
+def test_relaxed_tie_is_broken_by_agreement_not_by_the_alphabet():
+    """I5. Two markets share one identical window -- what `global_pause` and
+    every multi-market dark period look like. A detector that finds one of
+    them and misses the other produces two tied candidates at IoU 1.0 under
+    the relaxed match. Breaking that tie on event content alone pairs the
+    MISSED market's truth with the OTHER market's correct detection whenever
+    the country codes sort that way, so the same detector quality reads
+    differently depending on which market was dropped.
+    """
+    t = [e("2024-10-27", "2024-11-16", country="FR", channel=None),
+         e("2024-10-27", "2024-11-16", country="NL", channel=None)]
+
+    for dropped, kept in (("FR", "NL"), ("NL", "FR")):
+        p = [x for x in t if x.country_code == kept]
+        res = match_events(t, p, strict=False)
+        assert len(res.matches) == 1
+        m = res.matches[0]
+        assert m.truth.country_code == kept, (
+            f"with {dropped} dropped, the surviving {kept} detection was "
+            f"paired with the missing market's truth")
+        assert m.pred.country_code == kept
+
+
+def test_agreement_tie_break_does_not_rescue_a_genuinely_wrong_field():
+    """The counterpart: when NO candidate agrees, the tie-break must not
+    invent one. `wrong_channel_oracle` is that case -- every detection has the
+    wrong channel, so the relaxed match still pairs them and channel accuracy
+    still reports the error."""
+    t = [e("2024-03-01", "2024-03-10", country="DE", channel="TV"),
+         e("2024-03-01", "2024-03-10", country="AT", channel="TV")]
+    p = [e("2024-03-01", "2024-03-10", country="DE", channel="__wrong__"),
+         e("2024-03-01", "2024-03-10", country="AT", channel="__wrong__")]
+    res = match_events(t, p, strict=False)
+    assert len(res.matches) == 2
+    # Country still agrees, so pairs stay within their market...
+    assert all(m.truth.country_code == m.pred.country_code for m in res.matches)
+    # ...and the channel error is still fully visible.
+    assert all(m.truth.channel != m.pred.channel for m in res.matches)
+
+
+def test_strict_matching_is_unaffected_by_the_agreement_tie_break():
+    """Under strict matching every candidate agrees on all three fields, so
+    the new term is constant and cannot reorder anything."""
+    t = [e("2024-03-01", "2024-03-10")]
+    p = [e("2024-03-01", "2024-03-05"), e("2024-03-06", "2024-03-10")]
+    a = match_events(t, p)
+    b = match_events(t, list(reversed(p)))
+    assert len(a.matches) == 1 and len(b.matches) == 1
+    assert a.matches[0].pred.start == b.matches[0].pred.start
+
+
+def test_overlapping_events_reassign_to_preserve_two_valid_matches():
+    from itertools import permutations
+    truth = [e("2024-01-01", "2024-01-07"), e("2024-01-01", "2024-01-15")]
+    pred = [e("2024-01-01", "2024-01-09"), e("2024-01-03", "2024-01-09")]
+    assignments = []
+    for ts in permutations(truth):
+        for ps in permutations(pred):
+            result = match_events(list(ts), list(ps))
+            assert result.n_tp == 2
+            assert result.n_fp == result.n_fn == 0
+            assignments.append(sorted((m.truth.end, m.pred.start) for m in result.matches))
+    assert all(x == assignments[0] for x in assignments)
+
+
+def test_match_count_agrees_with_exhaustive_small_assignments():
+    import random
+    from itertools import permutations
+    rng = random.Random(42)
+    for _ in range(60):
+        def interval():
+            start = rng.randint(1, 15)
+            end = rng.randint(start, 28)
+            return e(f"2024-01-{start:02}", f"2024-01-{end:02}")
+        truth, pred = [interval() for _ in range(4)], [interval() for _ in range(4)]
+        expected = max(sum(iou(t, p) >= 0.5 for t, p in zip(truth, order))
+                       for order in permutations(pred))
+        got = match_events(truth, pred)
+        assert got.n_tp == expected
+        assert got.n_tp + got.n_fp == len(pred)
+        assert got.n_tp + got.n_fn == len(truth)
+
+
+def test_repeated_object_is_still_counted_as_duplicate_prediction():
+    t = e("2024-01-01", "2024-01-10")
+    got = match_events([t], [t, t])
+    assert (got.n_tp, got.n_fp, got.n_fn) == (1, 1, 0)
