@@ -1,9 +1,4 @@
-"""Detection package for identifying informative periods in marketing data.
-
-This package implements detection algorithms for:
-- Single-channel periods
-- Channel pulses
-"""
+"""Detection package for identifying informative periods in marketing data."""
 
 from .algorithms import (
     Event,
