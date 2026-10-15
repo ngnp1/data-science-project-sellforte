@@ -61,6 +61,17 @@ F1 (0.235) only reflects that the other five event types are not attempted.
 | false positives on null scenarios | 0.000 per country-year |
 | confidence of the 10 detections | mean 0.993, all correct |
 
+### Against the detection-library baseline (same 45 dev scenarios)
+
+| | detection-library (all types) | this (pulse only) |
+|---|---|---|
+| channel_pulse P / R / F1 | 1.000 / 1.000 / 1.000 (10/0/0) | 1.000 / 1.000 / 1.000 (10/0/0) |
+| overall P / R / F1 | 0.868 / 0.880 / 0.874 | 1.000 / 0.133 / 0.235 |
+| null FP per country-year | 0.038 | 0.000 |
+
+Overall recall is low by design: dark period, holdout, single channel, step change and
+staggered launch are not detected here.
+
 ### Caveats
 
 The 10 dev pulses are the easy case: every pause is an exact zero, pauses within a
@@ -72,3 +83,10 @@ So the scores above do not yet show behaviour on:
 - trains touching the start or end of the data: those pauses are dropped;
 - a single long pause: never a pulse (needs 2);
 - confidence on wrong detections: there were none to check against.
+
+## Next steps
+
+1. Stress test on harder pulses: synthetic series with partial pauses, uneven lengths,
+   trains at the data edges and lone long pauses, scored for detection and confidence.
+2. Layer B: a sticky two-state HMM for P(off), so a day's state also depends on its neighbours.
+3. Layer C: a hidden semi-Markov model, which models pause and on-period durations directly.
