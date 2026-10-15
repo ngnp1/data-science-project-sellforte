@@ -7,15 +7,37 @@ for pauses of similar length, with spend back on in between. Spend-only; sales a
 
 1. **Daily series.** For each market × channel, sum `media_investment` per day over
    the full date range. A day with no rows counts as spend 0.
-2. **On/off layer** (`onoff.py`). Each day gets a probability of being *off*:
+2. **On/off layer** (`onoff.py`). Each day gets a probability of being *off*. Two layers
+   exist; the rest of the method is identical for both. **Layer A** (default, `detect`):
    - usual level = median spend over days the channel actually ran;
    - cutoff = max(1e-6, 0.15 × usual level);
    - `P(off) = logistic((cutoff − spend) / (0.03 × usual level))`.
    At `P(off) = 0.5` this is exactly the hard rule "spend ≤ 15 % of usual = off";
    spend well above the cutoff is ≈ 0, true zeros are ≈ 1. A channel that never ran is never off.
+
+   **Layer B** (`p_off_hmm`, `detect_b`): a sticky two-state (on/off) hidden Markov model over
+   `x = spend / usual level`, solved with forward-backward; `P(off)` is the posterior of the off
+   state. Each day is judged together with its neighbours instead of on its own. Fixed priors,
+   chosen from what on/off spend looks like, not fitted to benchmark data:
+
+   | prior | value | why |
+   |---|---|---|
+   | P(stay in state) | 0.95 | on/off spells usually last a week or more |
+   | start | 0.5 / 0.5 | no prior on the first day |
+   | on emission | Gaussian around 1 with spread = 1.4826 × MAD of active days (floor 0.1), **flat above 1** | spending more than usual is still on; without the flat part a budget step-up would look like neither state |
+   | off emission | exponential, mean 0.05 | off means spend near zero |
+   | outliers | 5 % uniform over [0, max x], added to both states | one odd day must not force a state change |
+   | missing day | likelihood 1 for both states | no data: the neighbours decide |
+
+   Spike check: one full-spend day inside a pause (x ≈ 1, spread 0.2, max x ≈ 1.8) costs
+   ≈ 0.05/1.8 = 0.028 if it stays *off*, versus two switches (0.05/0.95)² × on-likelihood 2.0
+   ≈ 0.0055 if it turns *on*: staying off is ≈ 5× more likely, so the spike is absorbed (posterior P(off) 0.84 in the stress case).
+   Days inside a pause with spend above the 15 % cutoff are listed on the event as
+   `spike_absorbed:<date>` tags.
 3. **Off runs** (`pulse.py: off_runs`). Maximal stretches of days with `P(off) ≥ 0.5`.
    A run touching the first or last day is marked *censored*: we can't see its true start
-   (or end), so its length is only a lower bound.
+   (or end), so its length is only a lower bound. Under layer B, days with no data are
+   trimmed off a run's ends: a pause can't be shown to start or end on a day we can't see.
 4. **Grouping into trains** (`pulse.py: find_pulse_trains`).
    - keep runs of at least 7 days;
    - sort the uncensored runs by length; starting from the shortest, take the longest stretch
@@ -50,7 +72,8 @@ for pauses of similar length, with spend back on in between. Spend-only; sales a
 ```bash
 python -m pytest tests/pulse -q
 python -m pulse.stress
-python -m benchmark.eval.run_dev --detector pulse.detect:detect --load-data
+python -m benchmark.eval.run_dev --detector pulse.detect:detect --load-data     # layer A
+python -m benchmark.eval.run_dev --detector pulse.detect:detect_b --load-data   # layer B
 ```
 
 On Windows set `PYTHONUTF8=1` first, or printing the report fails on the console encoding.
@@ -92,6 +115,19 @@ So the scores above do not yet show behaviour on:
 - a single long pause: never a pulse (needs 2);
 - confidence on wrong detections: there were none to check against.
 
+### Layer A vs layer B on dev
+
+| | layer A | layer B |
+|---|---|---|
+| channel_pulse P / R / F1 | 1.000 / 1.000 / 1.000 (10/0/0) | 1.000 / 1.000 / 1.000 (10/0/0) |
+| pauses matched | 27 / 27 | 27 / 27 |
+| boundary error (median / p90 days) | 0 / 0 | 0 / 0 |
+| off-day coverage F1 | 1.000 | 1.000 |
+| null FP per country-year | 0.000 | 0.000 |
+| confidence (10 detections) | mean 0.993, all correct | mean 1.000, all correct |
+
+Identical on dev: every dev pause is a clean zero, which both layers read the same way.
+
 ## Stress test (harder pulse cases)
 
 The dev pulses are easy, so `stress.py` builds synthetic series where we know the answer
@@ -108,30 +144,32 @@ python -m pulse.stress              # prints the table below
 python -m pytest tests/pulse -q     # pins it: known failures are xfail(strict)
 ```
 
-| case | true pauses | trains found | pauses matched | max boundary error (days) | pulse probability |
-|---|---|---|---|---|---|
-| clean: 3 x 14d, exact zero | 3 | 1 | 3/3 | 0 | 0.99 |
-| partial: spend at 10% in pauses | 3 | 1 | 3/3 | 0 | 0.82 |
-| partial: spend at 25% in pauses | 3 | 0 | 0/3 | - | - |
-| near-zero noise 0-12% in pauses | 3 | 1 | 3/3 | 0 | 0.89 |
-| uneven 7/11/9 | 3 | 1 | 3/3 | 0 | 0.81 |
-| alternating 7/11/7/11 | 4 | 1 | 4/4 | 0 | 0.77 |
-| irregular gaps 20/60/35 | 4 | 1 | 4/4 | 0 | 0.99 |
-| 1-day spend spike inside each pause | 3 | 1 | 3/3 | 7 | 0.99 |
-| train starts on day 0 | 3 | 1 | 3/3 | 0 | 0.99 |
-| train runs to the last day | 3 | 1 | 3/3 | 0 | 0.99 |
-| 3 missing days scattered in on-periods | 3 | 1 | 3/3 | 0 | 0.99 |
-| 2 missing days inside a pause's flank | 3 | 1 | 3/3 | 2 | 0.93 |
-| only 2 pauses | 2 | 1 | 2/2 | 0 | 0.99 |
-| high noise (sigma 0.6) | 3 | 1 | 3/3 | 0 | 0.99 |
-| very high noise (sigma 1.0) | 3 | 1 | 3/3 | 0 | 0.99 |
-| long 30-day pause inside the train's window | 4 | 1 | 4/4 | 0 | 0.65 |
-| pulse across a 3x budget step | 3 | 1 | 3/3 | 0 | 0.99 |
-| short 5-day pauses (below MIN_DAYS) | 4 | 0 | 0/4 | - | - |
-| NO PULSE: lone 40-day pause | 0 | 0 | - | - | - |
-| NO PULSE: 2 pauses far apart (gap > 6x) | 0 | 0 | - | - | - |
-| NO PULSE: random 1-5 day dropouts | 0 | 0 | - | - | - |
-| NO PULSE: very high noise, no pauses | 0 | 0 | - | - | - |
+Each cell: pauses matched, max boundary error in days, pulse probability.
+
+| case | layer A | layer B |
+|---|---|---|
+| clean: 3 x 14d, exact zero | 3/3, err 0, p 0.99 | 3/3, err 0, p 1.00 |
+| partial: spend at 10% in pauses | 3/3, err 0, p 0.82 | 3/3, err 0, p 1.00 |
+| partial: spend at 25% in pauses | 0/3, err -, p - | 3/3, err 0, p 0.92 |
+| near-zero noise 0-12% in pauses | 3/3, err 0, p 0.89 | 3/3, err 0, p 1.00 |
+| uneven 7/11/9 | 3/3, err 0, p 0.81 | 3/3, err 0, p 0.82 |
+| alternating 7/11/7/11 | 4/4, err 0, p 0.77 | 4/4, err 0, p 0.78 |
+| irregular gaps 20/60/35 | 4/4, err 0, p 0.99 | 4/4, err 0, p 1.00 |
+| 1-day spend spike inside each pause | 3/3, err 7, p 0.99 | 3/3, err 0, p 0.99 |
+| train starts on day 0 | 3/3, err 0, p 0.99 | 3/3, err 0, p 1.00 |
+| train runs to the last day | 3/3, err 0, p 0.99 | 3/3, err 0, p 1.00 |
+| 3 missing days scattered in on-periods | 3/3, err 0, p 0.99 | 3/3, err 0, p 1.00 |
+| 2 missing days inside a pause's flank | 3/3, err 2, p 0.93 | 3/3, err 0, p 1.00 |
+| only 2 pauses | 2/2, err 0, p 0.99 | 2/2, err 0, p 1.00 |
+| high noise (sigma 0.6) | 3/3, err 0, p 0.99 | 3/3, err 0, p 1.00 |
+| very high noise (sigma 1.0) | 3/3, err 0, p 0.99 | 3/3, err 2, p 0.92 |
+| long 30-day pause inside the train's window | 4/4, err 0, p 0.65 | 4/4, err 0, p 0.65 |
+| pulse across a 3x budget step | 3/3, err 0, p 0.99 | 3/3, err 0, p 1.00 |
+| short 5-day pauses (below MIN_DAYS) | 0/4, err -, p - | 0/4, err -, p - |
+| NO PULSE: lone 40-day pause | 0 trains | 0 trains |
+| NO PULSE: 2 pauses far apart (gap > 6x) | 0 trains | 0 trains |
+| NO PULSE: random 1-5 day dropouts | 0 trains | 0 trains |
+| NO PULSE: very high noise, no pauses | 0 trains | 0 trains |
 
 Fixed after the first run (grouping and probability only; the on/off layer is unchanged):
 
@@ -145,23 +183,31 @@ Fixed after the first run (grouping and probability only; the on/off layer is un
 Dev scores are unchanged after the fix (pulses 10/0/0, 27/27 pauses, 0 null false
 positives, same confidences), and the four no-pulse controls stay silent.
 
-Still failing, left for layer B (all come from judging each day on its own):
+Layer A, still failing (all from judging each day on its own):
 - **Partial pauses above the cutoff**: spend at 25% of usual is "on", so the pulse is missed.
-  At 10% it is found, and the probability drops to 0.82, as it should.
-- **One spike inside a pause** splits it into a 7-day and a 6-day run; only the 7-day half
-  survives, so each pause is found with a 7-day boundary error.
+- **One spike inside a pause** splits it; each pause is found with a 7-day boundary error.
 - **Missing days next to a pause** count as off and extend it (2-day error).
-- **5-day pauses** are below `MIN_DAYS` by design.
+- **5-day pauses** are below `MIN_DAYS` by design (both layers).
 
-What holds: day-to-day noise up to sigma 1.0, irregular gaps, a 3x budget step under the
-pulse, scattered missing days, and all four no-pulse controls (lone long pause, two far-apart
-pauses, random 1-5 day dropouts, pure noise) produce no false pulse.
+Layer B:
+- **Fixes** the spike (7 → 0 days error, the spike day is tagged `spike_absorbed`) and the
+  missing days (2 → 0).
+- **Catches the 25 % partial pause** (3/3, probability 0.92). This was not a target: under the
+  current definition (off = spend ≤ 15 % of usual) a 25 % drop is arguably a step change, not a
+  pulse. Whether B should catch it is a definition question still open.
+- **New failure: very high noise (sigma 1.0)**: two genuinely low-spend days (0.32× and 0.09×
+  usual) right after a pause are absorbed into it, so that pause runs 2 days long. That is the
+  price of stickiness.
+- Confidence is higher overall (clean cases 1.00 instead of 0.99, 10 % partial 1.00 instead of
+  0.82): B's posterior is more certain about clearly-low days than A's per-day cutoff.
 
-For layer B: a sticky HMM decides each day's state together with its neighbours, so one
-on-day inside a pause or a missing day at its edge would not flip the state, and its
-probability reflects uncertain days.
+What holds for both: irregular gaps, a 3x budget step under the pulse, scattered missing days,
+edge pauses, alternating lengths, and all four no-pulse controls stay silent.
+
+The default stays layer A until the definition question is settled; layer B is available as
+`pulse.detect:detect_b`.
 
 ## Next steps
 
-1. Layer B: a sticky two-state HMM for P(off), so a day's state also depends on its neighbours.
+1. Decide whether a 25 % drop counts as a pause (it sets whether B's extra catch is right).
 2. Layer C: a hidden semi-Markov model, which models pause and on-period durations directly.

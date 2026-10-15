@@ -27,3 +27,17 @@ def test_pauses_of_mixed_length_form_one_train():
     trains = find_pulse_trains(runs)
     assert len(trains) == 1 and trains[0].n_pulses == 4
     assert 0 < pulse_probability(p_off(s), trains[0].components, runs) < 1
+
+
+def test_hmm_absorbs_a_spike_and_ignores_missing_days():
+    from pulse.onoff import p_off_hmm
+    s = pd.Series(100.0, index=DAYS)
+    s.iloc[20:34] = 0.0
+    s.iloc[27] = 100.0                       # one day of full spend inside the pause
+    present = pd.Series(True, index=DAYS)
+    present.iloc[34:36] = False              # no data right after the pause
+    p = p_off_hmm(s, present)
+    assert (p.iloc[20:34] >= 0.5).all()      # spike day stays off
+    assert p.iloc[10] < 0.01 and p.iloc[50] < 0.01
+    runs = off_runs(p >= 0.5, present)
+    assert [(a, b) for a, b, _ in runs] == [(DAYS[20], DAYS[33])]  # missing days don't extend it

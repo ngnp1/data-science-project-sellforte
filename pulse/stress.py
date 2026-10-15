@@ -10,8 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from pulse.onoff import off_mask, p_off
-from pulse.pulse import find_pulse_trains, off_runs, pulse_probability
+from pulse.detect import run_series
 
 DAYS = pd.date_range("2024-01-01", periods=365)
 
@@ -20,7 +19,7 @@ def series(pauses, noise=0.2, pause_level=0.0, seed=0, base=None, spike=False, m
     """Daily spend ~100 with lognormal noise; each (start, length) pause set to pause_level.
 
     spike: one day of full spend in the middle of each pause.
-    missing: day indices with no data (the detector treats them as off, like detect.py).
+    missing: day indices with no data (spend 0 and present False, like detect.py).
     """
     rng = np.random.default_rng(seed)
     s = (100.0 if base is None else base) * rng.lognormal(0, noise, len(DAYS))
@@ -89,13 +88,13 @@ def overlap(a, b):
     return inter / ((max(a[1], b[1]) - min(a[0], b[0])).days + 1)
 
 
-def score(pauses, **kw):
+def score(pauses, layer="A", **kw):
     """(trains found, true pauses matched at IoU >= 0.5, max boundary error, probabilities)."""
     s = series(pauses, **kw)
-    runs = off_runs(off_mask(s))
-    trains = find_pulse_trains(runs)
-    p = p_off(s)
-    probs = [pulse_probability(p, t.components, runs) for t in trains]
+    present = pd.Series(True, index=DAYS)
+    present.iloc[list(kw.get("missing", ()))] = False
+    found_trains = run_series(s, present, layer)
+    trains, probs = [t for t, _, _ in found_trains], [p for _, p, _ in found_trains]
     truth = [(DAYS[a], DAYS[a + n - 1]) for a, n in pauses]
     found = [c for t in trains for c in t.components]
     pairs = [(t, max(found, key=lambda f: overlap(t, f))) for t in truth if found]
@@ -104,16 +103,22 @@ def score(pauses, **kw):
     return len(trains), len(pairs), err, probs
 
 
+def _cell(pauses, layer, kw):
+    n, matched, err, probs = score(pauses, layer, **kw)
+    if not pauses:
+        return f"{n} trains"
+    return (f"{matched}/{len(pauses)}, err {'-' if err is None else err}, "
+            f"p {', '.join(f'{x:.2f}' for x in probs) or '-'}")
+
+
 def main():
-    rows = ["| case | true pauses | trains found | pauses matched | max boundary error (days) | pulse probability |",
-            "|---|---|---|---|---|---|"]
+    """Per case and layer: pauses matched, max boundary error (days), pulse probability."""
+    rows = ["| case | layer A | layer B |", "|---|---|---|"]
     for name, pauses, kw in CASES:
-        n, matched, err, probs = score(pauses, **kw)
-        rows.append(f"| {name} | {len(pauses)} | {n} | {matched}/{len(pauses)} | "
-                    f"{'-' if err is None else err} | {', '.join(f'{x:.2f}' for x in probs) or '-'} |")
+        rows.append(f"| {name} | {_cell(pauses, 'A', kw)} | {_cell(pauses, 'B', kw)} |")
     for name, pauses, kw in NEGATIVES:
-        n, _, _, probs = score(pauses, **kw)
-        rows.append(f"| NO PULSE: {name} | 0 | {n} | - | - | {', '.join(f'{x:.2f}' for x in probs) or '-'} |")
+        a, b = (score(pauses, layer, **kw)[0] for layer in "AB")
+        rows.append(f"| NO PULSE: {name} | {a} trains | {b} trains |")
     print("\n".join(rows))
 
 

@@ -23,13 +23,26 @@ class PulseTrain:
     n_pulses: int
 
 
-def off_runs(mask: pd.Series) -> list[Run]:
+def off_runs(mask: pd.Series, present: pd.Series | None = None) -> list[Run]:
     """Maximal runs of off days. A run touching either end of the data is censored:
-    its true start (or end) is not visible, so its length is a lower bound."""
+    its true start (or end) is not visible, so its length is a lower bound.
+
+    With `present`, missing days are trimmed off each run's ends: a pause cannot be
+    shown to start or end on a day we have no data for.
+    """
     m = mask.to_numpy(bool)
+    pr = np.ones(len(m), bool) if present is None else present.astype(bool).to_numpy()
     edges = np.flatnonzero(np.diff(np.r_[0, m.astype(int), 0]))
-    return [(mask.index[lo], mask.index[hi - 1], lo == 0 or hi == len(m))
-            for lo, hi in zip(edges[::2], edges[1::2])]
+    runs = []
+    for lo, hi in zip(edges[::2], edges[1::2]):
+        a, b = lo, hi
+        while a < b and not pr[a]:
+            a += 1
+        while b > a and not pr[b - 1]:
+            b -= 1
+        if a < b:
+            runs.append((mask.index[a], mask.index[b - 1], lo == 0 or hi == len(m)))
+    return runs
 
 
 def _days(span) -> int:
