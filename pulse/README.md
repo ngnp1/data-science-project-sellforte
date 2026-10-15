@@ -106,18 +106,28 @@ mean confidence 0.993.
 | channel_pulse P / R / F1 | 1.000 / 1.000 / 1.000 (10/0/0) | 1.000 / 1.000 / 1.000 (10/0/0) |
 | false pulses | 0 | 0 |
 
-### Confidence: how results are reported
+### How confidence is used
 
 Every detected pulse is **reported, with a confidence score** (`detection_confidence` = the
-pulse probability). Nothing is filtered by confidence, so the precision/recall/F1 above count
-every detection, as if each were authoritative; the confidence travels alongside for the
-reader to weigh or cut on.
+pulse probability). How the evaluator (`benchmark/eval`, unchanged) uses it:
 
-The confidence is a **heuristic score in [0, 1], not a calibrated probability**. It is built from
-P(off), pause-length regularity and coverage, but nothing has checked that, say, 0.8 means
-"right 80 % of the time". The evaluator's reliability table shows all 10 dev pulses in the
-0.9–1.0 bin and all correct, but with no wrong or low-confidence pulses on dev there is nothing
-to calibrate against. Treat it as a ranking (higher = cleaner pulse), not as odds.
+- **Precision/recall/F1 ignore confidence.** Every emitted event is matched and counted,
+  i.e. treated as authoritative: `runner.py:59` matches all predictions, and
+  `metrics.py:32-37` (`event_level`) and `metrics.py:39-45` (`per_type`) compute P/R/F1 from
+  those matches. There is no confidence threshold in the headline numbers.
+- **Two things are computed from confidence** (`runner.py:80-81`):
+  - *reliability curve* (`metrics.py:140-173`): confidence in 10 bins vs the share that matched
+    truth. Layer B on dev: one bin, 0.9–1.0, n = 10, mean confidence 0.992, empirical precision 1.000;
+  - *operating curve* (`metrics.py:176-202`): P/R after dropping detections below a cut,
+    0.00 to 1.00 in steps of 0.05. Layer B's 10 dev pulses range 0.988–0.994, so all 10 are kept
+    (pulse P = R = 1.000) up to cut 0.95 and none at 1.00.
+- Nothing else: no Brier score, AUC or calibration fit. Matching (`matching.py`) never reads
+  confidence.
+
+The confidence is a **heuristic score in [0, 1], not a calibrated probability**: it combines
+P(off), pause-length regularity and coverage, and nothing has shown that 0.8 means "right 80 %
+of the time". Dev has no false or low-confidence pulses, so calibration can't be judged yet;
+treat the score as a ranking (higher = cleaner pulse), not as odds.
 
 ### Caveats
 
