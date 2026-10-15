@@ -1,4 +1,4 @@
-"""Score hook: media.csv in, channel_pulse and natural_holdout Events out.
+"""Score hook: media.csv in, channel_pulse, natural_holdout and single_channel Events out.
 
     python -m benchmark.eval.run_dev --detector pulse.detect:detect --load-data     # layer C (default)
     python -m benchmark.eval.run_dev --detector pulse.detect:detect_b --load-data   # layer B
@@ -11,7 +11,7 @@ import pandas as pd
 from benchmark.eval.model import Event
 from pulse.hsmm import p_off_hsmm
 from pulse.onoff import RHO, active_level, p_off, p_off_hmm
-from pulse.holdout import find_holdouts
+from pulse.holdout import find_holdouts, find_single_channel, market_p_off
 from pulse.pulse import find_pulse_trains, off_spells, pulse_probability
 
 
@@ -54,10 +54,12 @@ def detect(media_df, sales_df, sid: str, layer: str = "C") -> list[Event]:
                                     event_type="channel_pulse", start=t.start, end=t.end,
                                     components=t.components, detection_confidence=prob,
                                     tags=tuple(f"spike_absorbed:{d.date()}" for d in spikes)))
-        for channel, a, b, conf in find_holdouts(market, spans):
-            events.append(Event(sid=sid, country_code=country, channel=channel,
-                                event_type="natural_holdout", start=a, end=b,
-                                detection_confidence=conf))
+        p = market_p_off(market)
+        for kind, found in (("natural_holdout", find_holdouts(market, spans, p)),
+                            ("single_channel", find_single_channel(market, p))):
+            events += [Event(sid=sid, country_code=country, channel=channel, event_type=kind,
+                             start=a, end=b, detection_confidence=conf)
+                       for channel, a, b, conf in found]
     return events
 
 

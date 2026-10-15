@@ -23,3 +23,12 @@ def test_one_channel_off_while_others_run_is_a_holdout():
 def test_not_a_holdout_when_others_stop_too_or_it_is_a_pulse_pause():
     assert find_holdouts({"A": _ch([(60, 42)]), "B": _ch([(60, 42)]), "C": _ch([(60, 42)])}, {}) == []
     assert find_holdouts({"A": _ch([(60, 42)]), "B": _ch()}, {"A": [(DAYS[60], DAYS[101])]}) == []
+
+
+def test_single_channel_needs_all_but_one_off_and_three_channels():
+    from pulse.holdout import find_single_channel
+    three = {"A": _ch([(60, 42)]), "B": _ch([(60, 42)]), "C": _ch()}
+    [(ch, a, b, conf)] = find_single_channel(three)
+    assert (ch, a, b) == ("C", DAYS[60], DAYS[101]) and 0.9 < conf <= 1
+    assert find_holdouts(three, {}) == []          # not also a holdout
+    assert find_single_channel({"A": _ch([(60, 42)]), "B": _ch()}) == []   # 2 channels: a holdout

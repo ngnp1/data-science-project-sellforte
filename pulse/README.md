@@ -306,6 +306,42 @@ Every miss, from the series:
 - **FN dev_042 US YouTube** (all 730 days): the channel never spent, so there is no "on" level
   to stop from.
 
+## Single channel
+
+**Definition** (`benchmark/BENCHMARK.md:40`): all channels in a market stop spending except one.
+The event names the channel that stayed on. "Stop" uses the same 15 % definition.
+
+**Method** (`holdout.py: find_single_channel`, reusing the holdout's layer-C P(off), same prior):
+1. Mark each active channel's off spells (15 %-checked).
+2. Keep runs of at least 7 days in which exactly one active channel is on and all others are off;
+   the survivor must stay the same through the run.
+3. Confidence = mean P(off) of the stopped channels × (1 − mean P(off) of the survivor).
+
+**2-channel markets.** With two channels, "all but one stop" (`BENCHMARK.md:40`) and "one channel
+stops while the others run" (`BENCHMARK.md:41`) are the same spend pattern, and the docs give no
+tie-break. We take the literal reading and report it as a **natural holdout**; single channel
+needs 3+ active channels. On dev this costs 3 single-channel FNs, which are also the 3 holdout FPs.
+The opposite rule would fix those 3 but break dev's 2 detectable 2-channel holdouts
+(dev_011, dev_027): 4 errors instead of 6. It is not adopted because that choice would be made
+from dev's mix, not from the definitions.
+
+`pulse.detect:detect` now emits pulse, holdout and single-channel events; P(off) is computed once
+per market and shared by holdout and single channel. Full dev run: 178 s.
+
+**Dev scores** (test split untouched):
+
+| | teammate detection-library | this (layer C) |
+|---|---|---|
+| single_channel P / R / F1 | 1.000 / 0.700 / 0.824 (7 TP / 0 FP / 3 FN) | 1.000 / 0.700 / 0.824 (7 / 0 / 3) |
+| boundary error (median / p90 days) | – | 0 / 0 |
+| confidence (7 detections) | – | 0.992–0.997, all correct |
+| natural_holdout | 16 / 3 / 4 | 17 / 3 / 3 (unchanged) |
+| channel_pulse | 10 / 0 / 0 | 10 / 0 / 0 (unchanged) |
+| null FP per country-year | – | 0.000 |
+
+Every miss: the 3 FNs (dev_008 NL TikTok, dev_009 FR Affiliate, dev_010 US Print) are all in
+2-channel markets, reported as holdouts by the rule above.
+
 ## Next steps
 
 1. Get pulses with wrong or low-confidence detections (a harder benchmark or real data) so the

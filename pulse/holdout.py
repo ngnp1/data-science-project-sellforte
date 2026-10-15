@@ -17,13 +17,19 @@ HOLDOUT_MEDIAN = 42.0   # days
 HOLDOUT_SIGMA = 0.8
 
 
-def find_holdouts(market: dict, pulse_spans: dict) -> list[tuple]:
+def market_p_off(market: dict) -> dict:
+    """{channel: P(off) per day} for the market's active channels, layer C, holdout prior."""
+    return {ch: p_off_hsmm(s, pr, HOLDOUT_MEDIAN, HOLDOUT_SIGMA)
+            for ch, (s, pr) in market.items() if np.isfinite(active_level(s))}
+
+
+def find_holdouts(market: dict, pulse_spans: dict, p: dict | None = None) -> list[tuple]:
     """market: {channel: (spend, present)}; pulse_spans: {channel: [(start, end), ...]}.
 
     Returns [(channel, start, end, confidence)].
     """
-    active = {ch: sp for ch, sp in market.items() if np.isfinite(active_level(sp[0]))}
-    p = {ch: p_off_hsmm(s, pr, HOLDOUT_MEDIAN, HOLDOUT_SIGMA) for ch, (s, pr) in active.items()}
+    p = market_p_off(market) if p is None else p
+    active = {ch: market[ch] for ch in p}
     out = []
     for ch, (s, present) in active.items():
         others = [o for o in active if o != ch]
@@ -36,4 +42,30 @@ def find_holdouts(market: dict, pulse_spans: dict) -> list[tuple]:
             # One channel stops while the others keep running: most others must stay on.
             if np.mean([x > 0.5 for x in on]) > 0.5:
                 out.append((ch, a, b, float(p[ch].loc[a:b].mean() * np.mean(on))))
+    return out
+
+
+def find_single_channel(market: dict, p: dict | None = None) -> list[tuple]:
+    """All channels except one stop: runs of >= MIN_DAYS where exactly one active channel is on.
+
+    Needs 3+ active channels: with 2, "all but one stop" and "one stops while the other runs"
+    are the same spend pattern, and it is reported as a natural holdout (see README).
+    Returns [(surviving channel, start, end, confidence)].
+    """
+    p = market_p_off(market) if p is None else p
+    if len(p) < 3:
+        return []
+    off = pd.DataFrame({ch: False for ch in p}, index=next(iter(market.values()))[0].index)
+    for ch in p:
+        s, present = market[ch]
+        for a, b, _ in off_spells(p[ch], s, present, RHO * active_level(s)):
+            off.loc[a:b, ch] = True
+    # The one channel still on, on days when all the others are off; None otherwise.
+    survivor = (~off).idxmax(axis=1).where(off.sum(axis=1) == len(p) - 1)
+    out = []
+    for _, run in survivor.groupby((survivor != survivor.shift()).cumsum()):
+        ch, a, b = run.iloc[0], run.index[0], run.index[-1]
+        if isinstance(ch, str) and len(run) >= MIN_DAYS:
+            stopped = np.mean([p[o].loc[a:b].mean() for o in p if o != ch])
+            out.append((ch, a, b, float(stopped * (1 - p[ch].loc[a:b].mean()))))
     return out
