@@ -25,7 +25,8 @@ def _log_pmf_and_survival(pmf: np.ndarray):
     return np.log(np.r_[1e-300, np.clip(pmf, 1e-300, None)]), np.log(np.r_[1.0, surv])  # by length d
 
 
-def p_off_hsmm(s: pd.Series, present: pd.Series | None = None) -> pd.Series:
+def p_off_hsmm(s: pd.Series, present: pd.Series | None = None,
+               off_median: float = OFF_MEDIAN, off_sigma: float = OFF_SIGMA) -> pd.Series:
     q = p_off(s).to_numpy()
     n = len(q)
     le = np.log(np.stack([HMM_EPS * q + (1 - HMM_EPS) * (1 - q),        # on
@@ -35,7 +36,7 @@ def p_off_hsmm(s: pd.Series, present: pd.Series | None = None) -> pd.Series:
     cum = np.concatenate([np.zeros((2, 1)), le.cumsum(axis=1)], axis=1)  # cum[k, t]: days 1..t
     d = np.arange(1, n + 1, dtype=float)
     lp, ls = zip(_log_pmf_and_survival(np.ones(n)),                                          # on
-                 _log_pmf_and_survival(np.exp(-0.5 * (np.log(d / OFF_MEDIAN) / OFF_SIGMA) ** 2) / d))  # off
+                 _log_pmf_and_survival(np.exp(-0.5 * (np.log(d / off_median) / off_sigma) ** 2) / d))  # off
 
     # A spell (a, b] of state k: start term, length term (survival if cut by an edge), evidence.
     # ponytail: O(n^2) spells per series; ~2 s per 2-year series in numpy, fine at benchmark size.

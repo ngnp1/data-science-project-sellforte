@@ -1,4 +1,4 @@
-"""Score hook: media.csv in, one channel_pulse Event per pulse train out.
+"""Score hook: media.csv in, channel_pulse and natural_holdout Events out.
 
     python -m benchmark.eval.run_dev --detector pulse.detect:detect --load-data     # layer C (default)
     python -m benchmark.eval.run_dev --detector pulse.detect:detect_b --load-data   # layer B
@@ -11,7 +11,8 @@ import pandas as pd
 from benchmark.eval.model import Event
 from pulse.hsmm import p_off_hsmm
 from pulse.onoff import RHO, active_level, p_off, p_off_hmm
-from pulse.pulse import find_pulse_trains, off_runs, pulse_probability
+from pulse.holdout import find_holdouts
+from pulse.pulse import find_pulse_trains, off_spells, pulse_probability
 
 
 def run_series(s: pd.Series, present: pd.Series | None = None, layer: str = "A"):
@@ -26,10 +27,7 @@ def run_series(s: pd.Series, present: pd.Series | None = None, layer: str = "A")
     else:
         p = (p_off_hmm if layer == "B" else p_off_hsmm)(s, present)
     cut = RHO * active_level(s)
-    # The definition, checked per pause: typical spend (median over days with data)
-    # must be <= RHO x usual. Smoothing may absorb odd days, never redefine "off".
-    ok = s if present is None else s[present.astype(bool)]
-    runs = [r for r in off_runs(p >= 0.5, present) if ok.loc[r[0]:r[1]].median() <= cut]
+    runs = off_spells(p, s, present, cut)
     out = []
     for t in find_pulse_trains(runs):
         # Days the layer called off although spend was above the cutoff: absorbed spikes.
@@ -44,14 +42,22 @@ def detect(media_df, sales_df, sid: str, layer: str = "C") -> list[Event]:
     m = media_df.assign(date=pd.to_datetime(media_df["date"]))
     days = pd.date_range(m["date"].min(), m["date"].max())
     events = []
-    for (country, channel), g in m.groupby(["country_code", "advertising_channel"]):
-        daily = g.groupby("date")["media_investment"].sum()
-        s, present = daily.reindex(days, fill_value=0.0), pd.Series(days.isin(daily.index), index=days)
-        for t, prob, spikes in run_series(s, present, layer):
+    for country, mc in m.groupby("country_code"):
+        market, spans = {}, {}
+        for channel, g in mc.groupby("advertising_channel"):
+            daily = g.groupby("date")["media_investment"].sum()
+            s, present = daily.reindex(days, fill_value=0.0), pd.Series(days.isin(daily.index), index=days)
+            market[channel] = (s, present)
+            for t, prob, spikes in run_series(s, present, layer):
+                spans.setdefault(channel, []).extend(t.components)
+                events.append(Event(sid=sid, country_code=country, channel=channel,
+                                    event_type="channel_pulse", start=t.start, end=t.end,
+                                    components=t.components, detection_confidence=prob,
+                                    tags=tuple(f"spike_absorbed:{d.date()}" for d in spikes)))
+        for channel, a, b, conf in find_holdouts(market, spans):
             events.append(Event(sid=sid, country_code=country, channel=channel,
-                                event_type="channel_pulse", start=t.start, end=t.end,
-                                components=t.components, detection_confidence=prob,
-                                tags=tuple(f"spike_absorbed:{d.date()}" for d in spikes)))
+                                event_type="natural_holdout", start=a, end=b,
+                                detection_confidence=conf))
     return events
 
 

@@ -264,6 +264,48 @@ B on the stress test (2- and 3-day spikes) and has no new misses. The cost is ru
 the full dev run instead of 8 s. Layers B and A stay available as `pulse.detect:detect_b` and
 `pulse.detect:detect_a`.
 
+## Natural holdout
+
+**Definition** (`benchmark/BENCHMARK.md:41`): one channel stops while the market's other channels
+keep running. "Stops" uses the same agreed 15 % definition as pulses.
+
+**Method** (`holdout.py`, built on layer C):
+1. P(off) per day for every active channel in the market, from layer C with a broader off-spell
+   prior than pulses: holdout tests typically run from a couple of weeks to a few months, so
+   lognormal, median **42 days**, log-spread **0.8** (≈ 2.5 to 20 weeks). Fixed, not fitted to dev.
+2. Off spells from it, checked against the 15 % definition (median spend ≤ 15 % of usual).
+3. Keep a spell if it is at least 7 days, does not start on the first day of the data (from
+   spend alone that looks like a late launch), is not one of the channel's pulse pauses, and
+   **more than half of the market's other active channels stay on** through it (mean P(off) < 0.5).
+4. Confidence = mean P(off) of the channel over the spell × mean "on-ness" (1 − mean P(off)) of
+   the other channels. Heuristic, in [0, 1], same caveats as the pulse confidence.
+
+`pulse.detect:detect` now emits both pulse and holdout events (per market, so holdouts can see
+the other channels). Full dev run: 170 s.
+
+**Dev scores** (45 scenarios, test split untouched):
+
+| | teammate detection-library | this (layer C) |
+|---|---|---|
+| natural_holdout P / R / F1 | 0.842 / 0.800 / 0.821 (16 TP / 3 FP / 4 FN) | **0.850 / 0.850 / 0.850 (17 / 3 / 3)** |
+| boundary error (median / p90 days) | – | 0 / 0 |
+| channel_pulse | 10 / 0 / 0 | 10 / 0 / 0 (unchanged) |
+| null FP per country-year | – | 0.000 |
+
+Confidence: all 20 holdout detections score 0.99+, including the 3 false positives, so it does
+not separate them (see below).
+
+Every miss, from the series:
+- **3 FP — dev_008 NL, dev_009 FR, dev_010 US**: `single_channel` periods in markets with only
+  2 channels. "All channels but one stop" and "one channel stops while the other runs" are the
+  same spend pattern there; the label can't be recovered from spend. Will be revisited with the
+  single-channel detector.
+- **FN dev_036 US Google Discovery** (60 days from the first day): excluded on purpose, since a
+  channel off from day one looks like a late launch.
+- **FN dev_040 PL Cinema** (5 days): below `MIN_DAYS` = 7, by design.
+- **FN dev_042 US YouTube** (all 730 days): the channel never spent, so there is no "on" level
+  to stop from.
+
 ## Next steps
 
 1. Get pulses with wrong or low-confidence detections (a harder benchmark or real data) so the

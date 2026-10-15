@@ -105,3 +105,11 @@ def pulse_probability(p_off: pd.Series, components, runs: list[Run]) -> float:
                  if _days((a, b)) >= MIN_DAYS and a <= hi and b >= lo)
     coverage = lengths.sum() / inside if inside else 1.0
     return float(days.mean() * (1 - min(1.0, lengths.std() / lengths.mean())) * min(1.0, coverage))
+
+
+def off_spells(p: pd.Series, s: pd.Series, present: pd.Series | None, cut: float) -> list[Run]:
+    """Off runs from a layer's P(off), kept only if they meet the definition: typical
+    spend (median over days with data) <= cut. Smoothing may absorb odd days, never
+    redefine "off"."""
+    ok = s if present is None else s[present.astype(bool)]
+    return [r for r in off_runs(p >= 0.5, present) if ok.loc[r[0]:r[1]].median() <= cut]
