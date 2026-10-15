@@ -16,7 +16,7 @@ from pulse.pulse import find_pulse_trains, off_runs, pulse_probability
 DAYS = pd.date_range("2024-01-01", periods=365)
 
 
-def series(pauses, noise=0.2, pause_level=0.0, seed=0, base=None, spike=False, missing=()):
+def series(pauses, noise=0.2, pause_level=0.0, seed=0, base=None, spike=False, missing=(), extra=()):
     """Daily spend ~100 with lognormal noise; each (start, length) pause set to pause_level.
 
     spike: one day of full spend in the middle of each pause.
@@ -30,6 +30,8 @@ def series(pauses, noise=0.2, pause_level=0.0, seed=0, base=None, spike=False, m
         if spike:
             s[start + n // 2] = 100.0
     s[list(missing)] = 0.0
+    for start, n in extra:  # off periods that are not part of the pulse
+        s[start:start + n] = 0.0
     return pd.Series(s, index=DAYS)
 
 
@@ -67,6 +69,9 @@ CASES = [
     ("only 2 pauses", regular(2, 14), {}),
     ("high noise (sigma 0.6)", regular(3, 14), {"noise": 0.6}),
     ("very high noise (sigma 1.0)", regular(3, 14), {"noise": 1.0}),
+    # The 30-day pause (110-139) is not part of the 14-day train but sits inside its window.
+    ("long 30-day pause inside the train's window", [(60, 14), (88, 14), (150, 14), (178, 14)],
+     {"extra": [(110, 30)]}),
     ("pulse across a 3x budget step", [(150, 14), (192, 14), (234, 14)], {"base": step_base()}),
     ("short 5-day pauses (below MIN_DAYS)", regular(4, 5), {}),
 ]
@@ -87,9 +92,10 @@ def overlap(a, b):
 def score(pauses, **kw):
     """(trains found, true pauses matched at IoU >= 0.5, max boundary error, probabilities)."""
     s = series(pauses, **kw)
-    trains = find_pulse_trains(off_runs(off_mask(s)))
+    runs = off_runs(off_mask(s))
+    trains = find_pulse_trains(runs)
     p = p_off(s)
-    probs = [pulse_probability(p, t.components) for t in trains]
+    probs = [pulse_probability(p, t.components, runs) for t in trains]
     truth = [(DAYS[a], DAYS[a + n - 1]) for a, n in pauses]
     found = [c for t in trains for c in t.components]
     pairs = [(t, max(found, key=lambda f: overlap(t, f))) for t in truth if found]

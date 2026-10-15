@@ -5,10 +5,7 @@ from pulse.stress import CASES, NEGATIVES, score
 
 KNOWN_FAILURES = {
     "partial: spend at 25% in pauses": "above the 15% cutoff, so treated as on",
-    "alternating 7/11/7/11": "11 > 1.5 x 7: the 7s and 11s land in different length groups",
     "1-day spend spike inside each pause": "the spike splits each pause; 7-day boundary error",
-    "train starts on day 0": "pauses touching the data edge are dropped",
-    "train runs to the last day": "pauses touching the data edge are dropped",
     "2 missing days inside a pause's flank": "missing days extend the pause by 2 days",
     "short 5-day pauses (below MIN_DAYS)": "below MIN_DAYS = 7 by design",
 }

@@ -14,18 +14,25 @@ for pauses of similar length, with spend back on in between. Spend-only; sales a
    At `P(off) = 0.5` this is exactly the hard rule "spend ≤ 15 % of usual = off";
    spend well above the cutoff is ≈ 0, true zeros are ≈ 1. A channel that never ran is never off.
 3. **Off runs** (`pulse.py: off_runs`). Maximal stretches of days with `P(off) ≥ 0.5`.
-   Runs touching the first or last day are dropped (we can't see where they start or end).
+   A run touching the first or last day is marked *censored*: we can't see its true start
+   (or end), so its length is only a lower bound.
 4. **Grouping into trains** (`pulse.py: find_pulse_trains`).
    - keep runs of at least 7 days;
-   - sort by length; a run joins the current group if it is at most 1.5 × the group's
-     **median** length, otherwise it starts a new group (the median stops one short pause
-     from capping the rest of the train);
+   - sort the uncensored runs by length; starting from the shortest, take the longest stretch
+     in which **every** length is within 1.5 × the stretch's **median** (either way). The whole
+     group is checked at once, so alternating 7/11-day pauses (median 9) stay together;
    - within a group, split wherever the gap between two pauses exceeds 6 × the shorter pause;
-   - a chunk with at least 2 pauses is a pulse train. Its window runs from the first pause's
-     start to the last pause's end; the pauses are kept as `components`.
+   - a chunk with at least 2 pauses is a pulse train;
+   - a censored edge run joins a train if it is not longer than 1.5 × the train's median and
+     sits within the gap limit of the train's first or last pause. It can extend a train but
+     never create one;
+   - the train's window runs from the first pause's start to the last pause's end; the pauses
+     are kept as `components`.
 5. **Pulse probability** (`pulse.py: pulse_probability`) = mean `P(off)` over the train's
-   off-days × (1 − coefficient of variation of the pause lengths, floored at 0).
-   Clean, equal-length pauses score near 1; partial or uneven pauses score lower.
+   off-days × (1 − coefficient of variation of the pause lengths, floored at 0) × coverage,
+   where coverage = the train's pause days ÷ all off-run days (runs ≥ 7 days) inside its window.
+   Clean, equal-length pauses score near 1; partial or uneven pauses, or a train whose window
+   contains an off period it didn't claim, score lower.
    It is exported as the event's `detection_confidence`.
 
 | constant | value | file |
@@ -108,16 +115,17 @@ python -m pytest tests/pulse -q     # pins it: known failures are xfail(strict)
 | partial: spend at 25% in pauses | 3 | 0 | 0/3 | - | - |
 | near-zero noise 0-12% in pauses | 3 | 1 | 3/3 | 0 | 0.89 |
 | uneven 7/11/9 | 3 | 1 | 3/3 | 0 | 0.81 |
-| alternating 7/11/7/11 | 4 | 1 | 2/4 | 0 | 0.99 |
+| alternating 7/11/7/11 | 4 | 1 | 4/4 | 0 | 0.77 |
 | irregular gaps 20/60/35 | 4 | 1 | 4/4 | 0 | 0.99 |
 | 1-day spend spike inside each pause | 3 | 1 | 3/3 | 7 | 0.99 |
-| train starts on day 0 | 3 | 1 | 2/3 | 0 | 0.99 |
-| train runs to the last day | 3 | 1 | 2/3 | 0 | 0.99 |
+| train starts on day 0 | 3 | 1 | 3/3 | 0 | 0.99 |
+| train runs to the last day | 3 | 1 | 3/3 | 0 | 0.99 |
 | 3 missing days scattered in on-periods | 3 | 1 | 3/3 | 0 | 0.99 |
 | 2 missing days inside a pause's flank | 3 | 1 | 3/3 | 2 | 0.93 |
 | only 2 pauses | 2 | 1 | 2/2 | 0 | 0.99 |
 | high noise (sigma 0.6) | 3 | 1 | 3/3 | 0 | 0.99 |
 | very high noise (sigma 1.0) | 3 | 1 | 3/3 | 0 | 0.99 |
+| long 30-day pause inside the train's window | 4 | 1 | 4/4 | 0 | 0.65 |
 | pulse across a 3x budget step | 3 | 1 | 3/3 | 0 | 0.99 |
 | short 5-day pauses (below MIN_DAYS) | 4 | 0 | 0/4 | - | - |
 | NO PULSE: lone 40-day pause | 0 | 0 | - | - | - |
@@ -125,27 +133,33 @@ python -m pytest tests/pulse -q     # pins it: known failures are xfail(strict)
 | NO PULSE: random 1-5 day dropouts | 0 | 0 | - | - | - |
 | NO PULSE: very high noise, no pauses | 0 | 0 | - | - | - |
 
-What breaks:
+Fixed after the first run (grouping and probability only; the on/off layer is unchanged):
+
+| case | before | after | root cause |
+|---|---|---|---|
+| alternating 7/11/7/11 | 2/4 pauses, probability 0.99 | 4/4, 0.77 | grouping checked each new pause against the median of the group *so far* ([7, 7] → 7, so 11 > 10.5 was rejected) instead of the whole group (median 9) |
+| train starts on day 0 | 2/3, 0.99 | 3/3, 0.99 | runs touching the data edge were dropped outright |
+| train runs to the last day | 2/3, 0.99 | 3/3, 0.99 | same |
+| over-confidence | 0.99 regardless of what was left out | coverage term; the new "long 30-day pause inside the window" case scores 0.65 | the probability only looked at the pauses it kept |
+
+Dev scores are unchanged after the fix (pulses 10/0/0, 27/27 pauses, 0 null false
+positives, same confidences), and the four no-pulse controls stay silent.
+
+Still failing, left for layer B (all come from judging each day on its own):
 - **Partial pauses above the cutoff**: spend at 25% of usual is "on", so the pulse is missed.
   At 10% it is found, and the probability drops to 0.82, as it should.
 - **One spike inside a pause** splits it into a 7-day and a 6-day run; only the 7-day half
   survives, so each pause is found with a 7-day boundary error.
-- **Pauses touching the data edge** are dropped, so 2 of 3 pauses are found.
-- **Alternating 7/11-day pauses** end up in different length groups: only one pair forms a train.
 - **Missing days next to a pause** count as off and extend it (2-day error).
 - **5-day pauses** are below `MIN_DAYS` by design.
-- **The probability is over-confident** when pauses are lost: 0.99 for a train that found only
-  2 of 4 pauses, or that lost one to the data edge, because it only looks at the pauses it kept.
 
 What holds: day-to-day noise up to sigma 1.0, irregular gaps, a 3x budget step under the
 pulse, scattered missing days, and all four no-pulse controls (lone long pause, two far-apart
 pauses, random 1-5 day dropouts, pure noise) produce no false pulse.
 
-For layer B: the spike, missing-day and partial-pause failures all come from deciding each
-day on its own. A sticky HMM decides each day's state together with its neighbours, so one
-on-day inside a pause or a missing day at its edge would not flip the state. That also gives a
-probability that reflects uncertain days. The edge, alternating-length and over-confidence
-issues are grouping rules, not the on/off layer, and need their own fixes.
+For layer B: a sticky HMM decides each day's state together with its neighbours, so one
+on-day inside a pause or a missing day at its edge would not flip the state, and its
+probability reflects uncertain days.
 
 ## Next steps
 

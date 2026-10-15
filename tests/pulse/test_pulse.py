@@ -23,6 +23,7 @@ def test_pauses_of_mixed_length_form_one_train():
     s = pd.Series(100.0, index=DAYS)
     for start, n in [(20, 7), (50, 10), (80, 12), (110, 10)]:
         s.iloc[start:start + n] = 0.0
-    trains = find_pulse_trains(off_runs(off_mask(s)))
+    runs = off_runs(off_mask(s))
+    trains = find_pulse_trains(runs)
     assert len(trains) == 1 and trains[0].n_pulses == 4
-    assert 0 < pulse_probability(p_off(s), trains[0].components) < 1
+    assert 0 < pulse_probability(p_off(s), trains[0].components, runs) < 1

@@ -20,10 +20,10 @@ def detect(media_df, sales_df, sid: str) -> list[Event]:
     for (country, channel), g in m.groupby(["country_code", "advertising_channel"]):
         # A day with no rows is spend 0, i.e. off, same as the missing-day rule.
         s = g.groupby("date")["media_investment"].sum().reindex(days, fill_value=0.0)
-        p = p_off(s)
-        for t in find_pulse_trains(off_runs(off_mask(s))):
+        p, runs = p_off(s), off_runs(off_mask(s))
+        for t in find_pulse_trains(runs):
             events.append(Event(sid=sid, country_code=country, channel=channel,
                                 event_type="channel_pulse", start=t.start, end=t.end,
                                 components=t.components,
-                                detection_confidence=pulse_probability(p, t.components)))
+                                detection_confidence=pulse_probability(p, t.components, runs)))
     return events
