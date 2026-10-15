@@ -41,3 +41,15 @@ def test_hmm_absorbs_a_spike_and_ignores_missing_days():
     assert p.iloc[10] < 0.01 and p.iloc[50] < 0.01
     runs = off_runs(p >= 0.5, present)
     assert [(a, b) for a, b, _ in runs] == [(DAYS[20], DAYS[33])]  # missing days don't extend it
+
+
+def test_hsmm_absorbs_a_2_day_spike_and_ignores_a_short_outage():
+    from pulse.hsmm import p_off_hsmm
+    s = pd.Series(100.0, index=DAYS)
+    s.iloc[20:34] = 0.0
+    s.iloc[27:29] = 100.0                    # two days of full spend inside the pause
+    s.iloc[80:83] = 0.0                      # a 3-day outage: too short to be a pause
+    p = p_off_hsmm(s)
+    assert (p.iloc[20:34] >= 0.5).all()
+    assert (p.iloc[80:83] < 0.5).all()
+    assert p.iloc[10] < 0.01 and p.iloc[150] < 0.01

@@ -19,7 +19,7 @@ def series(pauses, noise=0.2, pause_level=0.0, seed=0, base=None, spike=False, m
            extra_level=None):
     """Daily spend ~100 with lognormal noise; each (start, length) pause set to pause_level.
 
-    spike: one day of full spend in the middle of each pause.
+    spike: days of full spend in the middle of each pause (True = 1 day, or a count).
     missing: day indices with no data (spend 0 and present False, like detect.py).
     """
     rng = np.random.default_rng(seed)
@@ -28,7 +28,7 @@ def series(pauses, noise=0.2, pause_level=0.0, seed=0, base=None, spike=False, m
         lvl = pause_level(rng, n) if callable(pause_level) else pause_level
         s[start:start + n] = lvl
         if spike:
-            s[start + n // 2] = 100.0
+            s[start + n // 2:start + n // 2 + int(spike)] = 100.0
     s[list(missing)] = 0.0
     for start, n in extra:  # off periods that are not part of the pulse
         s[start:start + n] = 0.0
@@ -64,6 +64,9 @@ CASES = [
     ("alternating 7/11/7/11", [(60, 7), (95, 11), (134, 7), (169, 11)], {}),
     ("irregular gaps 20/60/35", [(60, 14), (94, 14), (168, 14), (217, 14)], {}),
     ("1-day spend spike inside each pause", regular(3, 14), {"spike": True}),
+    ("2-day spend spike inside each pause", regular(3, 14), {"spike": 2}),
+    ("3-day spend spike inside each pause", regular(3, 14), {"spike": 3}),
+    ("slightly uneven 13/15/14/16", [(60, 13), (101, 15), (144, 14), (186, 16)], {}),
     ("train starts on day 0", [(0, 14), (42, 14), (84, 14)], {}),
     ("train runs to the last day", [(281, 14), (323, 14), (351, 14)], {}),
     ("3 missing days scattered in on-periods", regular(3, 14), {"missing": (20, 100, 300)}),
@@ -82,6 +85,7 @@ NEGATIVES = [
     ("2 pauses far apart (gap > 6x)", [(40, 10), (250, 10)], {}),
     ("random 1-5 day dropouts", dropouts(), {}),
     ("very high noise, no pauses", [], {"noise": 1.0}),
+    ("short 1-4 day outages every ~3 weeks", [], {"extra": [(30 + 21 * i, 1 + i % 4) for i in range(15)]}),
     # Above the agreed 15% cutoff: a budget cut (step change), not a pause.
     ("spend drops to 25% for 3 x 14d", [], {"extra_level": (regular(3, 14), 25.0)}),
     ("spend drops to 30% for 3 x 14d", [], {"extra_level": (regular(3, 14), 30.0)}),
@@ -122,12 +126,12 @@ def _cell(pauses, layer, kw):
 
 def main():
     """Per case and layer: pauses matched, max boundary error (days), pulse probability."""
-    rows = ["| case | layer A | layer B |", "|---|---|---|"]
+    rows = ["| case | layer A | layer B | layer C |", "|---|---|---|---|"]
     for name, pauses, kw in CASES:
-        rows.append(f"| {name} | {_cell(pauses, 'A', kw)} | {_cell(pauses, 'B', kw)} |")
+        rows.append(f"| {name} | " + " | ".join(_cell(pauses, layer, kw) for layer in "ABC") + " |")
     for name, pauses, kw in NEGATIVES:
-        a, b = (score(pauses, layer, **kw)[0] for layer in "AB")
-        rows.append(f"| NO PULSE: {name} | {a} trains | {b} trains |")
+        rows.append(f"| NO PULSE: {name} | " + " | ".join(
+            f"{score(pauses, layer, **kw)[0]} trains" for layer in "ABC") + " |")
     print("\n".join(rows))
 
 
