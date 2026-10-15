@@ -42,6 +42,7 @@ for pauses of similar length, with spend back on in between. Spend-only; sales a
 
 ```bash
 python -m pytest tests/pulse -q
+python -m pulse.stress
 python -m benchmark.eval.run_dev --detector pulse.detect:detect --load-data
 ```
 
@@ -84,9 +85,69 @@ So the scores above do not yet show behaviour on:
 - a single long pause: never a pulse (needs 2);
 - confidence on wrong detections: there were none to check against.
 
+## Stress test (harder pulse cases)
+
+The dev pulses are easy, so `stress.py` builds synthetic series where we know the answer
+and each case adds one difficulty. Detector code and constants are unchanged; the point is
+to see what breaks.
+
+How the cases are made: 365 days of spend around 100/day with lognormal day-to-day noise
+(sigma 0.2 unless stated), fixed seed. A pulse is 3 pauses of 14 days with 28 on-days between
+them unless stated. A pause is spend 0 unless stated. "Pauses matched" means a found pause
+overlaps a true pause with IoU >= 0.5; boundary error is the worst start/end miss in days.
+
+```bash
+python -m pulse.stress              # prints the table below
+python -m pytest tests/pulse -q     # pins it: known failures are xfail(strict)
+```
+
+| case | true pauses | trains found | pauses matched | max boundary error (days) | pulse probability |
+|---|---|---|---|---|---|
+| clean: 3 x 14d, exact zero | 3 | 1 | 3/3 | 0 | 0.99 |
+| partial: spend at 10% in pauses | 3 | 1 | 3/3 | 0 | 0.82 |
+| partial: spend at 25% in pauses | 3 | 0 | 0/3 | - | - |
+| near-zero noise 0-12% in pauses | 3 | 1 | 3/3 | 0 | 0.89 |
+| uneven 7/11/9 | 3 | 1 | 3/3 | 0 | 0.81 |
+| alternating 7/11/7/11 | 4 | 1 | 2/4 | 0 | 0.99 |
+| irregular gaps 20/60/35 | 4 | 1 | 4/4 | 0 | 0.99 |
+| 1-day spend spike inside each pause | 3 | 1 | 3/3 | 7 | 0.99 |
+| train starts on day 0 | 3 | 1 | 2/3 | 0 | 0.99 |
+| train runs to the last day | 3 | 1 | 2/3 | 0 | 0.99 |
+| 3 missing days scattered in on-periods | 3 | 1 | 3/3 | 0 | 0.99 |
+| 2 missing days inside a pause's flank | 3 | 1 | 3/3 | 2 | 0.93 |
+| only 2 pauses | 2 | 1 | 2/2 | 0 | 0.99 |
+| high noise (sigma 0.6) | 3 | 1 | 3/3 | 0 | 0.99 |
+| very high noise (sigma 1.0) | 3 | 1 | 3/3 | 0 | 0.99 |
+| pulse across a 3x budget step | 3 | 1 | 3/3 | 0 | 0.99 |
+| short 5-day pauses (below MIN_DAYS) | 4 | 0 | 0/4 | - | - |
+| NO PULSE: lone 40-day pause | 0 | 0 | - | - | - |
+| NO PULSE: 2 pauses far apart (gap > 6x) | 0 | 0 | - | - | - |
+| NO PULSE: random 1-5 day dropouts | 0 | 0 | - | - | - |
+| NO PULSE: very high noise, no pauses | 0 | 0 | - | - | - |
+
+What breaks:
+- **Partial pauses above the cutoff**: spend at 25% of usual is "on", so the pulse is missed.
+  At 10% it is found, and the probability drops to 0.82, as it should.
+- **One spike inside a pause** splits it into a 7-day and a 6-day run; only the 7-day half
+  survives, so each pause is found with a 7-day boundary error.
+- **Pauses touching the data edge** are dropped, so 2 of 3 pauses are found.
+- **Alternating 7/11-day pauses** end up in different length groups: only one pair forms a train.
+- **Missing days next to a pause** count as off and extend it (2-day error).
+- **5-day pauses** are below `MIN_DAYS` by design.
+- **The probability is over-confident** when pauses are lost: 0.99 for a train that found only
+  2 of 4 pauses, or that lost one to the data edge, because it only looks at the pauses it kept.
+
+What holds: day-to-day noise up to sigma 1.0, irregular gaps, a 3x budget step under the
+pulse, scattered missing days, and all four no-pulse controls (lone long pause, two far-apart
+pauses, random 1-5 day dropouts, pure noise) produce no false pulse.
+
+For layer B: the spike, missing-day and partial-pause failures all come from deciding each
+day on its own. A sticky HMM decides each day's state together with its neighbours, so one
+on-day inside a pause or a missing day at its edge would not flip the state. That also gives a
+probability that reflects uncertain days. The edge, alternating-length and over-confidence
+issues are grouping rules, not the on/off layer, and need their own fixes.
+
 ## Next steps
 
-1. Stress test on harder pulses: synthetic series with partial pauses, uneven lengths,
-   trains at the data edges and lone long pauses, scored for detection and confidence.
-2. Layer B: a sticky two-state HMM for P(off), so a day's state also depends on its neighbours.
-3. Layer C: a hidden semi-Markov model, which models pause and on-period durations directly.
+1. Layer B: a sticky two-state HMM for P(off), so a day's state also depends on its neighbours.
+2. Layer C: a hidden semi-Markov model, which models pause and on-period durations directly.
