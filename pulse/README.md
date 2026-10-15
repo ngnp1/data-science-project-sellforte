@@ -85,8 +85,10 @@ On Windows set `PYTHONUTF8=1` first, or printing the report fails on the console
 
 ## Dev scores (45 scenarios, test split untouched)
 
-This detector only emits `channel_pulse`, so read the pulse rows. The overall
-F1 (0.235) only reflects that the other five event types are not attempted. Scores below are for the default (layer B); layer A is identical on dev except confidence 0.993.
+Only pulse metrics are reported. This detector emits `channel_pulse` events only, so the
+evaluator's overall precision/recall/F1 (which counts all six event types) says nothing about
+it and is left out. Scores are for the default (layer B); layer A is identical on dev except
+mean confidence 0.993.
 
 | metric | value |
 |---|---|
@@ -102,11 +104,20 @@ F1 (0.235) only reflects that the other five event types are not attempted. Scor
 | | detection-library (all types) | this (pulse only) |
 |---|---|---|
 | channel_pulse P / R / F1 | 1.000 / 1.000 / 1.000 (10/0/0) | 1.000 / 1.000 / 1.000 (10/0/0) |
-| overall P / R / F1 | 0.868 / 0.880 / 0.874 | 1.000 / 0.133 / 0.235 |
-| null FP per country-year | 0.038 | 0.000 |
+| false pulses | 0 | 0 |
 
-Overall recall is low by design: dark period, holdout, single channel, step change and
-staggered launch are not detected here.
+### Confidence: how results are reported
+
+Every detected pulse is **reported, with a confidence score** (`detection_confidence` = the
+pulse probability). Nothing is filtered by confidence, so the precision/recall/F1 above count
+every detection, as if each were authoritative; the confidence travels alongside for the
+reader to weigh or cut on.
+
+The confidence is a **heuristic score in [0, 1], not a calibrated probability**. It is built from
+P(off), pause-length regularity and coverage, but nothing has checked that, say, 0.8 means
+"right 80 % of the time". The evaluator's reliability table shows all 10 dev pulses in the
+0.9–1.0 bin and all correct, but with no wrong or low-confidence pulses on dev there is nothing
+to calibrate against. Treat it as a ranking (higher = cleaner pulse), not as odds.
 
 ### Caveats
 
