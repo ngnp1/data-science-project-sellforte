@@ -1,7 +1,7 @@
 """Score hook: media.csv in, one channel_pulse Event per pulse train out.
 
-    python -m benchmark.eval.run_dev --detector pulse.detect:detect --load-data     # layer A
-    python -m benchmark.eval.run_dev --detector pulse.detect:detect_b --load-data   # layer B
+    python -m benchmark.eval.run_dev --detector pulse.detect:detect --load-data     # layer B (default)
+    python -m benchmark.eval.run_dev --detector pulse.detect:detect_a --load-data   # layer A
 """
 from __future__ import annotations
 
@@ -22,8 +22,11 @@ def run_series(s: pd.Series, present: pd.Series | None = None, layer: str = "A")
         p, present = p_off(s), None
     else:
         p = p_off_hmm(s, present)
-    runs = off_runs(p >= 0.5, present)
     cut = RHO * active_level(s)
+    # The definition, checked per pause: typical spend (median over days with data)
+    # must be <= RHO x usual. Smoothing may absorb odd days, never redefine "off".
+    ok = s if present is None else s[present.astype(bool)]
+    runs = [r for r in off_runs(p >= 0.5, present) if ok.loc[r[0]:r[1]].median() <= cut]
     out = []
     for t in find_pulse_trains(runs):
         # Days the layer called off although spend was above the cutoff: absorbed spikes.
@@ -32,7 +35,7 @@ def run_series(s: pd.Series, present: pd.Series | None = None, layer: str = "A")
     return out
 
 
-def detect(media_df, sales_df, sid: str, layer: str = "A") -> list[Event]:
+def detect(media_df, sales_df, sid: str, layer: str = "B") -> list[Event]:
     if media_df is None:
         raise ValueError("pass --load-data so the detector gets media.csv")
     m = media_df.assign(date=pd.to_datetime(media_df["date"]))
@@ -49,5 +52,5 @@ def detect(media_df, sales_df, sid: str, layer: str = "A") -> list[Event]:
     return events
 
 
-def detect_b(media_df, sales_df, sid: str) -> list[Event]:
-    return detect(media_df, sales_df, sid, layer="B")
+def detect_a(media_df, sales_df, sid: str) -> list[Event]:
+    return detect(media_df, sales_df, sid, layer="A")

@@ -36,12 +36,12 @@ def off_mask(s: pd.Series, present: pd.Series | None = None) -> pd.Series:
     return p_off(s, present) >= ONOFF_CUT
 
 
-# --- Layer B: a sticky two-state HMM over x = spend / usual level -----------
-# Fixed domain priors, not fitted to any benchmark data.
+# --- Layer B: a sticky two-state HMM over layer A's verdicts ---------------
+# Layer B does not redefine "off": its evidence for each day is layer A's P(off)
+# (spend <= RHO x usual), read as a noisy observation. It only decides each day
+# together with its neighbours. Fixed priors, not fitted to any benchmark data.
 HMM_STAY = 0.95       # P(state persists to the next day): on/off spells usually last a week+
-OFF_SCALE = 0.05      # off-state spend ~ exponential with mean 5% of the usual level
-EPS_OUT = 0.05        # outlier share in both states: uniform over [0, max x]
-SIGMA_FLOOR = 0.1     # floor on the on-state spread, so a near-constant series isn't brittle
+HMM_EPS = 0.05        # P(a day's layer-A verdict is wrong): one odd day must not force a switch
 
 
 def p_off_hmm(s: pd.Series, present: pd.Series | None = None) -> pd.Series:
@@ -49,21 +49,14 @@ def p_off_hmm(s: pd.Series, present: pd.Series | None = None) -> pd.Series:
 
     Missing days (present False) are uninformative: their neighbours decide.
     """
-    level = active_level(s)
-    if not np.isfinite(level) or level <= 0:
-        return pd.Series(0.0, index=s.index)
-    x = s.to_numpy(float) / level
-    ok = np.isfinite(x) & (True if present is None else present.astype(bool).to_numpy())
-    active = x[ok & (x > RHO)]
-    sigma = max(SIGMA_FLOOR, 1.4826 * float(np.median(np.abs(active - np.median(active))))) if active.size else SIGMA_FLOOR
-    u = EPS_OUT / max(1.0, float(x[ok].max())) if ok.any() else 0.0
-    xs = np.where(ok, x, 0.0)
-    # On: Gaussian around the usual level, flat above it (spending more is still on).
-    on = (1 - EPS_OUT) * np.exp(-0.5 * ((np.minimum(xs, 1.0) - 1.0) / sigma) ** 2) / (sigma * np.sqrt(2 * np.pi)) + u
-    off = (1 - EPS_OUT) * np.exp(-xs / OFF_SCALE) / OFF_SCALE + u
-    e = np.where(ok[:, None], np.stack([on, off], axis=1), 1.0)
+    q = p_off(s).to_numpy()                       # layer A, without the missing-day rule
+    off = (1 - HMM_EPS) * q + HMM_EPS * (1 - q)   # P(day's evidence | off)
+    on = HMM_EPS * q + (1 - HMM_EPS) * (1 - q)    # P(day's evidence | on)
+    e = np.stack([on, off], axis=1)
+    if present is not None:
+        e[~present.astype(bool).to_numpy()] = 1.0
     T = np.array([[HMM_STAY, 1 - HMM_STAY], [1 - HMM_STAY, HMM_STAY]])
-    n = len(x)
+    n = len(q)
     a, b = np.empty((n, 2)), np.ones((n, 2))
     a[0] = 0.5 * e[0]
     a[0] /= a[0].sum()

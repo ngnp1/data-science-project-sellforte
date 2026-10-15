@@ -15,7 +15,8 @@ from pulse.detect import run_series
 DAYS = pd.date_range("2024-01-01", periods=365)
 
 
-def series(pauses, noise=0.2, pause_level=0.0, seed=0, base=None, spike=False, missing=(), extra=()):
+def series(pauses, noise=0.2, pause_level=0.0, seed=0, base=None, spike=False, missing=(), extra=(),
+           extra_level=None):
     """Daily spend ~100 with lognormal noise; each (start, length) pause set to pause_level.
 
     spike: one day of full spend in the middle of each pause.
@@ -31,6 +32,9 @@ def series(pauses, noise=0.2, pause_level=0.0, seed=0, base=None, spike=False, m
     s[list(missing)] = 0.0
     for start, n in extra:  # off periods that are not part of the pulse
         s[start:start + n] = 0.0
+    if extra_level:         # (spans, level): spend set to a level that is NOT a pause
+        for start, n in extra_level[0]:
+            s[start:start + n] = extra_level[1]
     return pd.Series(s, index=DAYS)
 
 
@@ -54,7 +58,6 @@ def dropouts(seed=1):
 CASES = [
     ("clean: 3 x 14d, exact zero", regular(3, 14), {}),
     ("partial: spend at 10% in pauses", regular(3, 14), {"pause_level": 10.0}),
-    ("partial: spend at 25% in pauses", regular(3, 14), {"pause_level": 25.0}),
     ("near-zero noise 0-12% in pauses", regular(3, 14),
      {"pause_level": lambda rng, n: rng.uniform(0, 12, n)}),
     ("uneven 7/11/9", [(60, 7), (95, 11), (134, 9)], {}),
@@ -79,6 +82,12 @@ NEGATIVES = [
     ("2 pauses far apart (gap > 6x)", [(40, 10), (250, 10)], {}),
     ("random 1-5 day dropouts", dropouts(), {}),
     ("very high noise, no pauses", [], {"noise": 1.0}),
+    # Above the agreed 15% cutoff: a budget cut (step change), not a pause.
+    ("spend drops to 25% for 3 x 14d", [], {"extra_level": (regular(3, 14), 25.0)}),
+    ("spend drops to 30% for 3 x 14d", [], {"extra_level": (regular(3, 14), 30.0)}),
+    ("spend drops to 40% for 3 x 14d", [], {"extra_level": (regular(3, 14), 40.0)}),
+    # Half the days at full spend: not a pause (B does not absorb this much on its own).
+    ("every other day off, 3 x 14d", [], {"extra_level": ([(a + i, 1) for a, n in regular(3, 14) for i in range(0, n, 2)], 0.0)}),
 ]
 
 
