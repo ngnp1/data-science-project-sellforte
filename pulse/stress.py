@@ -66,6 +66,11 @@ CASES = [
     ("1-day spend spike inside each pause", regular(3, 14), {"spike": True}),
     ("2-day spend spike inside each pause", regular(3, 14), {"spike": 2}),
     ("3-day spend spike inside each pause", regular(3, 14), {"spike": 3}),
+    # Longer than C's off-length prior (most mass on 7-30 days).
+    ("long pauses: 3 x 35d", regular(3, 35, first=40), {}),
+    ("long pauses: 3 x 42d", regular(3, 42, first=30), {}),
+    ("long pauses: 3 x 56d", regular(3, 56, first=20), {}),
+    ("1-day spike inside 3 x 42d pauses", regular(3, 42, first=30), {"spike": True}),
     ("slightly uneven 13/15/14/16", [(60, 13), (101, 15), (144, 14), (186, 16)], {}),
     ("train starts on day 0", [(0, 14), (42, 14), (84, 14)], {}),
     ("train runs to the last day", [(281, 14), (323, 14), (351, 14)], {}),

@@ -8,6 +8,7 @@ KNOWN_FAILURES = {
         "1-day spend spike inside each pause": "the spike splits each pause; 7-day boundary error",
         "2-day spend spike inside each pause": "the spike splits each pause; 7-day boundary error",
         "3-day spend spike inside each pause": "the spike splits each pause; 7-day boundary error",
+        "1-day spike inside 3 x 42d pauses": "the spike splits each pause; 21-day boundary error",
         "2 missing days inside a pause's flank": "missing days extend the pause by 2 days",
         "short 5-day pauses (below MIN_DAYS)": "below MIN_DAYS = 7 by design",
     },

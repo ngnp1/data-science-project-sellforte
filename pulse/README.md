@@ -203,6 +203,10 @@ Each cell: pauses matched, max boundary error in days, pulse probability.
 | 1-day spend spike inside each pause | 3/3, err 7, p 0.99 | 3/3, err 0, p 0.99 | 3/3, err 0, p 0.99 |
 | 2-day spend spike inside each pause | 3/3, err 7, p 0.99 | 3/3, err 7, p 0.99 | 3/3, err 0, p 0.99 |
 | 3-day spend spike inside each pause | 3/3, err 7, p 0.99 | 3/3, err 7, p 0.98 | 3/3, err 0, p 0.97 |
+| long pauses: 3 x 35d | 3/3, err 0, p 0.99 | 3/3, err 0, p 1.00 | 3/3, err 0, p 1.00 |
+| long pauses: 3 x 42d | 3/3, err 0, p 0.99 | 3/3, err 0, p 1.00 | 3/3, err 0, p 1.00 |
+| long pauses: 3 x 56d | 3/3, err 0, p 0.99 | 3/3, err 0, p 1.00 | 3/3, err 0, p 1.00 |
+| 1-day spike inside 3 x 42d pauses | 3/3, err 21, p 0.97 | 3/3, err 0, p 1.00 | 3/3, err 0, p 0.99 |
 | slightly uneven 13/15/14/16 | 4/4, err 0, p 0.92 | 4/4, err 0, p 0.92 | 4/4, err 0, p 0.91 |
 | train starts on day 0 | 3/3, err 0, p 0.99 | 3/3, err 0, p 0.99 | 3/3, err 0, p 0.99 |
 | train runs to the last day | 3/3, err 0, p 0.99 | 3/3, err 0, p 0.99 | 3/3, err 0, p 0.99 |
@@ -244,6 +248,9 @@ Layers A, B and C:
   unlikely.
 - **All three** respect the 15 % definition: drops to 25 %, 30 % and 40 % of usual are no pulse
   (step changes by definition), and 10 % is still a pulse.
+- **Long pauses** (3 × 35, 42 and 56 days), outside C's 7–30 day prior: all three layers find
+  every pause exactly; C's prior does not split or miss them. With a 1-day spike inside 42-day
+  pauses, A is 21 days off while B and C are exact.
 - **All three** miss 5-day pauses (below `MIN_DAYS`, by design) and stay silent on short 1–4 day
   outages and every other no-pulse control.
 - **No new misses** for B or C. An earlier version of B modelled spend itself instead of layer
