@@ -1,4 +1,4 @@
-"""Score hook: media.csv in, channel_pulse, natural_holdout and single_channel Events out.
+"""Score hook: media.csv in, channel_pulse, natural_holdout, single_channel and dark_period Events out.
 
     python -m benchmark.eval.run_dev --detector pulse.detect:detect --load-data     # layer C (default)
     python -m benchmark.eval.run_dev --detector pulse.detect:detect_b --load-data   # layer B
@@ -11,7 +11,7 @@ import pandas as pd
 from benchmark.eval.model import Event
 from pulse.hsmm import p_off_hsmm
 from pulse.onoff import RHO, active_level, p_off, p_off_hmm
-from pulse.holdout import find_holdouts, find_single_channel, market_p_off
+from pulse.holdout import find_dark_periods, find_holdouts, find_single_channel, market_p_off
 from pulse.pulse import find_pulse_trains, off_spells, pulse_probability
 
 
@@ -60,6 +60,9 @@ def detect(media_df, sales_df, sid: str, layer: str = "C") -> list[Event]:
             events += [Event(sid=sid, country_code=country, channel=channel, event_type=kind,
                              start=a, end=b, detection_confidence=conf)
                        for channel, a, b, conf in found]
+        events += [Event(sid=sid, country_code=country, channel=None, event_type="dark_period",
+                         start=a, end=b, detection_confidence=conf)
+                   for a, b, conf in find_dark_periods(market, p)]
     return events
 
 

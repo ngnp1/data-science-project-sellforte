@@ -342,6 +342,42 @@ per market and shared by holdout and single channel. Full dev run: 178 s.
 Every miss: the 3 FNs (dev_008 NL TikTok, dev_009 FR Affiliate, dev_010 US Print) are all in
 2-channel markets, reported as holdouts by the rule above.
 
+## Dark period
+
+**Definition** (`benchmark/BENCHMARK.md:39`): all channels in a market stop spending at the same
+time. "Stop" uses the same 15 % definition. The event has no single channel (`channel = None`).
+
+**Method** (`holdout.py: find_dark_periods`, reusing the holdout's layer-C P(off), same prior):
+1. Mark each active channel's off spells (15 %-checked), as for single channel.
+2. Keep runs of at least 7 days in which **every** active channel is off. A channel that never
+   spends is already stopped, so it counts as off; the market needs 2+ channels (with one,
+   "all stop" is just that channel's own pause).
+3. Confidence = mean over channels of their mean P(off) over the run.
+
+No overlap with the other types by construction: holdout needs most other channels on, single
+channel needs exactly one on. The optional `global_pause` tag (`benchmark/eval/README.md`) is not
+emitted: the evaluator does not read tags, and the loader already maps `global_pause` truth to
+`dark_period`.
+
+**Dev scores** (test split untouched):
+
+| | teammate detection-library | this (layer C) |
+|---|---|---|
+| dark_period P / R / F1 | 1.000 / 1.000 / 1.000 (12 / 0 / 0) | 1.000 / 1.000 / 1.000 (12 / 0 / 0) |
+| boundary error (median / p90 days) | – | 0 / 0 |
+| natural_holdout | 16 / 3 / 4 | 17 / 3 / 3 (unchanged) |
+| single_channel | 7 / 0 / 3 | 7 / 0 / 3 (unchanged) |
+| channel_pulse | 10 / 0 / 0 | 10 / 0 / 0 (unchanged) |
+| null FP per country-year | – | 0.000 |
+
+No misses. A first version required 2+ *active* channels and missed dev_042 US, a 2-channel
+market where one channel never spends; reading the definition as "all channels in the market"
+(a never-spending channel is already stopped) fixed it.
+
+Runtime: all detections together take 6–9 min for the full dev run on this machine. Profiling
+shows it is all layer C, which runs twice per channel (pulse prior and holdout prior); a single
+2-year series takes ~0.1 s. If this matters, the first fix is capping spell lengths in C.
+
 ## Next steps
 
 1. Get pulses with wrong or low-confidence detections (a harder benchmark or real data) so the

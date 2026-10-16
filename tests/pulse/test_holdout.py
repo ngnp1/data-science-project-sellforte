@@ -32,3 +32,14 @@ def test_single_channel_needs_all_but_one_off_and_three_channels():
     assert (ch, a, b) == ("C", DAYS[60], DAYS[101]) and 0.9 < conf <= 1
     assert find_holdouts(three, {}) == []          # not also a holdout
     assert find_single_channel({"A": _ch([(60, 42)]), "B": _ch()}) == []   # 2 channels: a holdout
+
+
+def test_dark_period_needs_every_channel_off():
+    from pulse.holdout import find_dark_periods
+    market = {"A": _ch([(60, 42)]), "B": _ch([(60, 42)])}
+    [(a, b, conf)] = find_dark_periods(market)
+    assert (a, b) == (DAYS[60], DAYS[101]) and 0.9 < conf <= 1
+    assert find_holdouts(market, {}) == []
+    assert find_dark_periods({"A": _ch([(60, 42)]), "B": _ch()}) == []
+    never = (pd.Series(0.0, index=DAYS), ON)                # a channel that never spends
+    assert len(find_dark_periods({"A": _ch([(60, 42)]), "B": never})) == 1

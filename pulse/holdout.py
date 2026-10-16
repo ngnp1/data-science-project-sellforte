@@ -55,11 +55,7 @@ def find_single_channel(market: dict, p: dict | None = None) -> list[tuple]:
     p = market_p_off(market) if p is None else p
     if len(p) < 3:
         return []
-    off = pd.DataFrame({ch: False for ch in p}, index=next(iter(market.values()))[0].index)
-    for ch in p:
-        s, present = market[ch]
-        for a, b, _ in off_spells(p[ch], s, present, RHO * active_level(s)):
-            off.loc[a:b, ch] = True
+    off = _off_frame(market, p)
     # The one channel still on, on days when all the others are off; None otherwise.
     survivor = (~off).idxmax(axis=1).where(off.sum(axis=1) == len(p) - 1)
     out = []
@@ -68,4 +64,30 @@ def find_single_channel(market: dict, p: dict | None = None) -> list[tuple]:
         if isinstance(ch, str) and len(run) >= MIN_DAYS:
             stopped = np.mean([p[o].loc[a:b].mean() for o in p if o != ch])
             out.append((ch, a, b, float(stopped * (1 - p[ch].loc[a:b].mean()))))
+    return out
+
+
+def _off_frame(market: dict, p: dict) -> pd.DataFrame:
+    """Day x channel: True inside the channel's 15 %-checked off spells."""
+    off = pd.DataFrame({ch: False for ch in p}, index=next(iter(market.values()))[0].index)
+    for ch in p:
+        s, present = market[ch]
+        for a, b, _ in off_spells(p[ch], s, present, RHO * active_level(s)):
+            off.loc[a:b, ch] = True
+    return off
+
+
+def find_dark_periods(market: dict, p: dict | None = None) -> list[tuple]:
+    """All channels in a market stop at the same time: runs of >= MIN_DAYS with every active
+    channel off (a channel that never spends is already stopped). Needs 2+ channels in the
+    market: with one, it is just that channel's pause. Returns [(start, end, confidence)]."""
+    p = market_p_off(market) if p is None else p
+    if len(market) < 2 or not p:
+        return []
+    dark = _off_frame(market, p).all(axis=1)
+    out = []
+    for _, run in dark[dark].groupby((~dark).cumsum()):
+        a, b = run.index[0], run.index[-1]
+        if len(run) >= MIN_DAYS:
+            out.append((a, b, float(np.mean([p[ch].loc[a:b].mean() for ch in p]))))
     return out
