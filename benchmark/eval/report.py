@@ -56,14 +56,11 @@ def render_markdown(results: dict) -> str:
         f"| {_pct(results['accuracy']['channel_accuracy'])} |",
         f"| Market accuracy (relaxed match) "
         f"| {_pct(results['accuracy']['market_accuracy'])} |",
-        f"| Day-level F1 | {_pct(results['day_level']['f1'])} |",
+        f"| Day coverage F1 (type ignored; pulse envelopes) | {_pct(results['day_level']['f1'])} |",
         "",
-        "> **Precision, recall and F1 cannot tell a silent detector from an "
-        "indiscriminate one.** A detector that reports nothing and a detector "
-        "that reports everything both land at 0.000 on all three here. The "
-        "null-scenario false-positive rate above is the only number that "
-        "separates them, so F1 must never be quoted from this report as a "
-        "standalone headline.",
+        "Read F1 alongside recall and false alarms. IoU and boundary errors "
+        "describe matched events only. Day coverage ignores event type and "
+        "uses the outer pulse window; it does not verify individual pauses.",
         "",
         "## Boundary error (days)",
         "",
@@ -85,6 +82,23 @@ def render_markdown(results: dict) -> str:
         lines.append(
             f"| {t} | {_pct(m['precision'])} | {_pct(m['recall'])} "
             f"| {_pct(m['f1'])} | {m['n_tp']} | {m['n_fp']} | {m['n_fn']} |")
+
+    pulse = results.get("pulse_components")
+    if pulse and (pulse["n_truth_pulses"] or pulse["n_pred_pulses"]):
+        m = pulse["event_level"]
+        lines += ["", "## Pulse off-window accuracy", "",
+                  "Individual pauses are matched at IoU >= 0.5; day coverage "
+                  "uses only the off-windows. Read alongside grouped-event F1.", "",
+                  "| metric | value |", "|---|---|",
+                  f"| Component precision | {_pct(m['precision'])} |",
+                  f"| Component recall | {_pct(m['recall'])} |",
+                  f"| Component F1 | {_pct(m['f1'])} |",
+                  f"| Component TP / FP / FN | {m['n_tp']} / {m['n_fp']} / {m['n_fn']} |",
+                  f"| Off-day coverage F1 | {_pct(pulse['day_level']['f1'])} |",
+                  f"| Predictions missing components | {pulse['missing_pred_components']} |",
+                  f"| Truth pulses missing components | {pulse['missing_truth_components']} |"]
+        if pulse["missing_truth_components"]:
+            lines += ["", "Warning: incomplete truth components prevent a full pulse assessment."]
 
     if results["confusion"]:
         lines += ["", "## Type confusion (truth → predicted)", "",
@@ -115,6 +129,11 @@ def render_markdown(results: dict) -> str:
             lines.append(
                 f"| {c['cut']:.2f} | {c['n_pred']} | {_pct(c['precision'])} "
                 f"| {_pct(c['recall'])} | {_pct(c['f1'])} |")
+
+    else:
+        lines += ["", "## Operating curve", "",
+                  "_Unavailable: no predictions, or some predictions lack confidence "
+                  "scores. Headline metrics still include every prediction._"]
 
     lines += ["", "## Breakdowns", ""]
     for axis, data in results["breakdowns"].items():

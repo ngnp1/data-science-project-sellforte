@@ -63,7 +63,7 @@ def evaluate_split(detector, split: str, root: Path | None = None,
 
     from benchmark.eval.metrics import (boundary_error, channel_and_market_accuracy,
                                         day_level, iou_stats, operating_curve,
-                                        per_type, reliability_curve,
+                                        per_type, pulse_components, reliability_curve,
                                         type_confusion)
 
     return {
@@ -75,6 +75,7 @@ def evaluate_split(detector, split: str, root: Path | None = None,
         "boundary": boundary_error(overall_match),
         "accuracy": channel_and_market_accuracy(all_truth, all_pred),
         "day_level": day_level(all_truth, all_pred),
+        "pulse_components": pulse_components(all_truth, all_pred),
         "confusion": type_confusion(all_truth, all_pred),
         "reliability": reliability_curve(all_truth, all_pred),
         "operating": operating_curve(all_truth, all_pred),
