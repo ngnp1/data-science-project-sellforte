@@ -7,6 +7,9 @@ from benchmark.eval import truth as T
 from benchmark.eval.report import render_markdown
 from benchmark.eval.runner import evaluate_split
 
+if not (Path(__file__).resolve().parents[2] / "benchmark/datasets/dev/dev_001/media.csv").exists():
+    pytest.skip("Generated benchmark datasets are not installed", allow_module_level=True)
+
 HAS_DATA = (Path(T.DATASETS_DIR) / "dev_truth/dev_001/meta.json").exists()
 requires_data = pytest.mark.skipif(not HAS_DATA, reason="Generated benchmark data is unavailable")
 SOME = T.list_scenarios("dev")[:8] if HAS_DATA else []

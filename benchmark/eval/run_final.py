@@ -80,6 +80,7 @@ def build_record(results: dict, args, run_index: int, marker: dict) -> dict:
         "run_index": run_index,
         "detector": args.detector,
         "detection_source_hash": source_hash(PROJECT_ROOT / "detection"),
+        "detectors_source_hash": source_hash(PROJECT_ROOT / "detectors"),
         "sealed_spec_hash": marker["spec_hash"],
         "sealed_at": marker["sealed_at"],
         "n_scenarios": results["n_scenarios"],

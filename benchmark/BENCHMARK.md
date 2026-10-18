@@ -1,83 +1,56 @@
-# The Benchmark
+# Benchmark data
 
-This benchmark contains synthetic marketing-spend datasets. Each dataset has a known answer stored in a separate file. You run a detector on the data, then compare its results with the hidden answers.
+The benchmark defines 100 synthetic datasets, called scenarios. Each has daily media spend and sales, plus a separate answer file listing the inserted events.
 
-There are 100 datasets, called **scenarios**. Each scenario contains a company’s daily advertising spend and sales data for one or more countries and channels, covering one or two years.
+- **Development (`dev`):** 45 scenarios for testing and improving the detector.
+- **Test (`test`):** 55 scenarios intended for evaluation after development is finished.
 
-## The two splits
+Using test answers to adjust the detector makes a later test score less useful as evidence of performance on unseen data.
 
-The scenarios are divided into two groups:
+## What it covers
 
-* **`dev`**: 45 scenarios for developing and testing your detector. You can check the correct answers as often as needed.
-* **`test`**: 55 scenarios for the final evaluation. Do not check the answers in advance.
+Scenarios include the [six event types](../README.md), events across markets, several events at once, short or unusual cases, and data with no inserted event. Scenarios without events help measure false alarms.
 
-This separation makes the final score meaningful. If you tune a detector using the same data on which it is evaluated, the score may no longer reflect how well it performs on unseen data.
+| Scenario family | Dev | Test |
+|---|---:|---:|
+| No event | 4 | 5 |
+| Dark period | 3 | 4 |
+| Single-channel period | 3 | 4 |
+| Natural holdout | 3 | 4 |
+| Step change | 5 | 6 |
+| Channel pulse | 3 | 4 |
+| Staggered launch | 3 | 4 |
+| Cross-market event | 3 | 4 |
+| Several events | 8 | 10 |
+| Edge cases | 10 | 10 |
+| **Total** | **45** | **55** |
 
-## File locations
+## Get data ready
 
-```text
-benchmark/datasets/dev/<scenario_id>/media.csv
-benchmark/datasets/dev/<scenario_id>/sales.csv
-benchmark/datasets/dev_truth/<scenario_id>/ground_truth.csv
-```
+The full generated CSVs are **not included** in this repository. For a quick check, use the sample and commands in the [main README](../README.md#check-the-results).
 
-The test split follows the same structure:
-
-```text
-benchmark/datasets/test/<scenario_id>/...
-benchmark/datasets/test_truth/<scenario_id>/...
-```
-
-## What each scenario contains
-
-Each scenario contains a small number of artificial **events** inserted into otherwise normal spend data. An event is a period during which something unusual happens: for example, a channel stops spending or its budget suddenly changes.
-
-The benchmark includes the following event types:
-
-| Event                 | Description                                                    |
-| --------------------- | -------------------------------------------------------------- |
-| Dark period           | All channels in a market stop spending at the same time.       |
-| Single-channel period | All channels except one stop spending.                         |
-| Natural holdout       | One channel stops while the others continue running.           |
-| Step change           | A channel’s spend jumps to a new level and remains there.      |
-| Channel pulse         | A channel repeatedly switches on and off.                      |
-| Staggered launch      | A channel starts running later in some markets than in others. |
-
-Some scenarios contain no event. These scenarios measure how often a detector raises a false alarm on normal data.
-
-## Scenario distribution
-
-| Scenario family         |    Dev |   Test |
-| ----------------------- | -----: | -----: |
-| No event                |      4 |      5 |
-| Dark period             |      3 |      4 |
-| Single-channel period   |      3 |      4 |
-| Natural holdout         |      3 |      4 |
-| Step change             |      5 |      6 |
-| Channel pulse           |      3 |      4 |
-| Staggered launch        |      3 |      4 |
-| Cross-market event      |      3 |      4 |
-| Several events combined |      8 |     10 |
-| Edge cases              |     10 |     10 |
-| **Total**               | **45** | **55** |
-
-The scenarios also vary in noise level, trends, number of countries, number of channels, and market size. This ensures that the detector is tested under a range of conditions.
-
-## Generating the data
-
-The data has already been generated and frozen. You only need these commands if you want to rebuild it from scratch:
+To generate development data, first install the project's Python dependencies and the [R dependencies](../synthetic_data_generator/README.md#setup). With the Python environment active, run from the repository folder:
 
 ```bash
 python -m benchmark.harness.generate --split dev
-python -m benchmark.harness.generate --split test --seal
 ```
 
-The generator is deterministic. The `--seal` option locks the test split to prevent accidental changes.
+This writes data under `benchmark/datasets/dev/` and answers under `benchmark/datasets/dev_truth/`. Each scenario has its own folder. The test split uses `test/` and `test_truth/` in the same way.
 
-## Scoring a detector
+The repository contains a seal and file checksums for the original test data. To reproduce that recorded evaluation, you need the matching original files. Seeds support repeatable generation, but library or environment changes can change the output. Do not replace the original seal or treat regenerated data as the original run.
 
-See [`benchmark/eval/README.md`](eval/README.md) for the exact command and an explanation of the score.
+For a separate experiment, generate into another directory:
 
-## More information
+```bash
+python -m benchmark.harness.generate --split all --root /tmp/sellforte-benchmark
+```
 
-[`benchmark/STRUCTURE.md`](STRUCTURE.md) explains how the benchmark directory is organized and is intended for anyone extending the benchmark.
+The standard evaluation commands use `benchmark/datasets/`; they do not automatically use this separate directory.
+
+## What the benchmark can tell us
+
+A score measures how well the detector finds inserted patterns under these simulation settings. It does not establish accuracy on real company data or prove that a detected period supports a causal conclusion.
+
+Scenario settings also overlap: for example, some event families use particular trends and market sizes. Their score differences cannot be attributed to one setting alone. The noise settings mainly affect sales and media response, so they are not a direct test of noisy spend detection.
+
+Continue with [evaluation instructions](eval/README.md) or the [folder guide](STRUCTURE.md).

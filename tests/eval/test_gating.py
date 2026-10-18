@@ -1,8 +1,10 @@
+import sys
 import json
+import pytest
 import subprocess
 from pathlib import Path
 
-PY = "synthetic_data_generator/.venv/bin/python"
+PY = sys.executable
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -25,6 +27,7 @@ def test_final_names_the_seal_check_in_its_help():
     assert "seal" in (p.stdout + p.stderr).lower()
 
 
+@pytest.mark.benchmark_data
 def test_dev_runs_freely_and_appends_history(tmp_path):
     """The dev split is free to run as often as you like, but the TEST must
     never write to the tracked benchmark/eval/dev_history.jsonl -- that file
@@ -46,24 +49,117 @@ def test_dev_runs_freely_and_appends_history(tmp_path):
     lines = hist.read_text().splitlines()
     assert len(lines) == 1
     last = json.loads(lines[0])
-    for key in ["timestamp", "label", "detector", "source_hash", "metrics"]:
+    for key in ["timestamp", "label", "detector", "source_hash", "detectors_source_hash",
+                "metrics"]:
         assert key in last
     assert last["metrics"]["f1"] == 1.0
 
 
+# Every import path by which detector code could reach the answer key.
+#
+# "benchmark.spec" is here because it is the answer key: it builds the events
+# the generator injects, so importing it hands the detector the event families
+# and their parameters directly. It also needs NO file access, which means the
+# runtime open() guard in tests/detection/test_pipeline.py cannot see it --
+# this static scan is the only thing that can. "benchmark.harness" carries
+# runner.truth_dir, which resolves a truth path without either marker string
+# appearing in the caller.
+FORBIDDEN_IMPORTS = (
+    "benchmark.eval",
+    "benchmark.spec",
+    "benchmark.harness",
+    "_truth",
+    "ground_truth",
+)
+
+
+def _truth_reaching_imports(text: str) -> list[str]:
+    """The needles present in `text`. Shared by the scan and its control."""
+    return [needle for needle in FORBIDDEN_IMPORTS if needle in text]
+
+
 def test_detection_package_has_no_import_path_to_truth():
     """Spec section 4: detector code must never be able to import a truth
-    loader. detection/ does not exist yet -- when Plan 3 creates it, this test
-    is what keeps the boundary real."""
+    loader, or anything that is equivalent to one."""
     det = ROOT / "detection"
     if not det.is_dir():
         return
     offenders = []
-    for py in det.rglob("*.py"):
-        text = py.read_text()
-        if "benchmark.eval" in text or "_truth" in text or "ground_truth" in text:
-            offenders.append(str(py.relative_to(ROOT)))
+    for f in det.rglob("*"):
+        if not f.is_file() or "__pycache__" in f.parts:
+            continue
+        try:
+            text = f.read_text()
+        except UnicodeDecodeError:
+            # A binary file under detection/ cannot be source, and a data blob
+            # is exactly what the companion check below exists to catch.
+            continue
+        found = _truth_reaching_imports(text)
+        if found:
+            offenders.append(f"{f.relative_to(ROOT)}: {found}")
     assert not offenders, f"detection/ reaches for truth: {offenders}"
+
+
+# One file, by name, is allowed to be Markdown instead of Python: a README
+# a reader opens to find the pipeline and the primitives without opening the
+# code. It holds no data and nothing here can import it as a smuggled answer
+# table, so it is a narrow exemption, not a loophole -- the test below proves
+# the guard still catches everything else.
+NON_SOURCE_EXEMPT_FILENAMES = {"README.md"}
+
+
+def test_the_detection_package_contains_only_source():
+    """The import scan and the final-run audit hash both used to look at *.py
+    alone. A precomputed answer table dropped under detection/ as JSON, CSV or
+    Parquet would have been read by the detector, scanned by neither, and
+    covered by no hash -- a way to smuggle in the answers that leaves no trace
+    in the audit record. detection/ is source; nothing else belongs there,
+    except the one exempt file named above."""
+    det = ROOT / "detection"
+    if not det.is_dir():
+        return
+    intruders = [str(f.relative_to(ROOT)) for f in det.rglob("*")
+                 if f.is_file() and f.suffix != ".py"
+                 and f.name not in NON_SOURCE_EXEMPT_FILENAMES
+                 and "__pycache__" not in f.parts]
+    assert not intruders, f"non-source files under detection/: {intruders}"
+
+
+def test_the_non_source_exemption_is_exactly_one_file():
+    """A broad exemption would let a real answer table hide behind it. This
+    pins the set to exactly the one file it names."""
+    assert NON_SOURCE_EXEMPT_FILENAMES == {"README.md"}
+
+
+def test_the_only_source_guard_still_catches_a_real_intruder():
+    """Positive control: a JSON file under detection/ must still fail the
+    guard above. Proves the exemption is narrow rather than a hole that
+    happens to admit only what exists today."""
+    det = ROOT / "detection"
+    intruder = det / "_gating_test_intruder.json"
+    intruder.write_text("{}")
+    try:
+        offenders = [str(f.relative_to(ROOT)) for f in det.rglob("*")
+                     if f.is_file() and f.suffix != ".py"
+                     and f.name not in NON_SOURCE_EXEMPT_FILENAMES
+                     and "__pycache__" not in f.parts]
+        assert "detection/_gating_test_intruder.json" in offenders
+    finally:
+        intruder.unlink()
+
+
+@pytest.mark.parametrize("line", [
+    "from benchmark.eval.truth import load_truth",
+    "from benchmark.spec.events import dark",
+    "from benchmark.harness.runner import truth_dir",
+    "path = DATASETS / 'dev_truth' / sid",
+    "df = pd.read_csv('ground_truth.csv')",
+])
+def test_the_import_scan_would_catch_a_violation(line):
+    """Positive control. A scan that cannot fail is not a gate, and this one
+    silently had a hole: benchmark.spec was unbanned for the whole of Plan 3.
+    Each line below must be caught by the scan the test above runs."""
+    assert _truth_reaching_imports(line), f"scan misses: {line}"
 
 
 def test_repeat_final_run_banners_the_report_and_increments_run_index(
@@ -80,6 +176,11 @@ def test_repeat_final_run_banners_the_report_and_increments_run_index(
     never near benchmark/eval/final_runs.jsonl.
     """
     from benchmark.eval import run_final
+
+    # Capture the real final_runs.jsonl state before the test, to verify
+    # the test does not modify it (immutability check).
+    real_final_runs_path = ROOT / "benchmark/eval/final_runs.jsonl"
+    real_final_runs_state = real_final_runs_path.read_text() if real_final_runs_path.exists() else None
 
     fake_final_runs = tmp_path / "final_runs.jsonl"
     monkeypatch.setattr(run_final, "FINAL_RUNS", fake_final_runs)
@@ -118,8 +219,10 @@ def test_repeat_final_run_banners_the_report_and_increments_run_index(
     assert prior_count == 2
     assert "#3" in run_final._repeat_run_banner(prior_count + 1, prior_count)
 
-    # The real final_runs.jsonl must still not exist as a result of this test.
-    assert not (ROOT / "benchmark/eval/final_runs.jsonl").exists()
+    # The real final_runs.jsonl must not be modified by this test. It may exist
+    # (after a prior final run), but its contents must be unchanged. This leak
+    # check catches if a test ever silently appended to the audit record.
+    assert (real_final_runs_path.read_text() if real_final_runs_path.exists() else None) == real_final_runs_state
 
 
 def _fake_results() -> dict:
@@ -184,6 +287,11 @@ def test_a_failing_out_path_still_records_the_final_run(tmp_path, monkeypatch):
     """
     import pytest
 
+    # Capture the real final_runs.jsonl state before the test, to verify
+    # the test does not modify it (immutability check).
+    real_final_runs_path = ROOT / "benchmark/eval/final_runs.jsonl"
+    real_final_runs_state = real_final_runs_path.read_text() if real_final_runs_path.exists() else None
+
     run_final, fake_final_runs = _stub_the_gated_path(
         monkeypatch, tmp_path, _fake_results())
 
@@ -203,7 +311,10 @@ def test_a_failing_out_path_still_records_the_final_run(tmp_path, monkeypatch):
 
     # And the NEXT run therefore knows it is a repeat.
     assert run_final._prior_run_count() == 1
-    assert not (ROOT / "benchmark/eval/final_runs.jsonl").exists()
+    # The real final_runs.jsonl must not be modified by this test. It may exist
+    # (after a prior final run), but its contents must be unchanged. This leak
+    # check catches if a test ever silently appended to the audit record.
+    assert (real_final_runs_path.read_text() if real_final_runs_path.exists() else None) == real_final_runs_state
 
 
 def test_compose_report_puts_the_repeat_banner_above_the_report(
@@ -248,3 +359,44 @@ def test_build_record_is_self_describing(tmp_path, monkeypatch):
     assert record["sealed_spec_hash"] == "deadbeef"
     assert record["metrics"]["f1"] == 1.0
     assert "detection_source_hash" in record and "timestamp" in record
+
+
+
+def _detector_sources() -> list:
+    """Every file a registered detector's code can live in: the detectors/
+    package itself and each registered detector class's own module, wherever
+    that module sits -- for_detector() will score any of them."""
+    import inspect
+
+    from detectors import registry
+    files = {f for f in (ROOT / "detectors").rglob("*.py") if "__pycache__" not in f.parts}
+    files |= {Path(inspect.getsourcefile(type(d))).resolve() for d in registry.available()}
+    return sorted(files)
+
+
+def test_detectors_have_no_import_path_to_truth():
+    """The harness now scores whatever is registered, not only detection/, so
+    the same static guard has to reach every registered detector's code."""
+    offenders = [f"{f}: {found}" for f in _detector_sources()
+                 if (found := _truth_reaching_imports(f.read_text()))]
+    assert not offenders, f"a detector reaches for truth: {offenders}"
+
+
+def test_the_detectors_package_contains_only_source():
+    pkg = ROOT / "detectors"
+    intruders = [str(f.relative_to(ROOT)) for f in pkg.rglob("*")
+                 if f.is_file() and f.suffix != ".py" and "__pycache__" not in f.parts]
+    assert not intruders, f"non-source files under detectors/: {intruders}"
+
+
+def test_the_final_record_hashes_the_detectors_package_too():
+    from types import SimpleNamespace
+
+    from benchmark.eval import run_final
+    from benchmark.eval.run_dev import source_hash
+    results = {"overall": {"precision": 1.0, "recall": 1.0, "f1": 1.0},
+               "iou": {"mean_iou": 1.0}, "null_fp_rate": 0.0, "n_scenarios": 1}
+    record = run_final.build_record(results, SimpleNamespace(detector="x"), 1,
+                                    {"spec_hash": "s", "sealed_at": "t"})
+    assert record["detectors_source_hash"] == source_hash(ROOT / "detectors")
+    assert record["detection_source_hash"] == source_hash(ROOT / "detection")

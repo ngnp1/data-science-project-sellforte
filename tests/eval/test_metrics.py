@@ -323,10 +323,7 @@ def test_operating_curve_keeps_full_confidence_detections_at_the_strictest_cut()
     assert M.operating_curve(t, p)[-1]["recall"] == 1.0
 
 
-@pytest.mark.skipif(
-    not (Path(__file__).resolve().parents[2] / "benchmark/datasets/dev_truth/dev_045/meta.json").exists(),
-    reason="Generated benchmark data is unavailable",
-)
+@pytest.mark.benchmark_data
 def test_market_accuracy_reads_the_same_whichever_market_is_dropped():
     """I5, on the real dev scenario that exposed it. `dev_045` is a
     `global_pause`: FR and NL share one identical dark window. A detector that

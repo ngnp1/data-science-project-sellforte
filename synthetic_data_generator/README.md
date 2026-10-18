@@ -1,90 +1,51 @@
-# Synthetic MMM Data Generator
+# Generate synthetic marketing data
 
-Generates synthetic marketing and sales data for the "Detecting Informative
-Periods in Marketing Data" project (Sellforte / Aalto). Output matches the
-schema of the `media.csv` / `sales.csv` samples Sellforte provided, with known
-"informative periods" (dark period, single-channel period, natural holdout,
-step change, plus bonus patterns) injected so you can test detection
-algorithms against a known answer key before the real dataset arrives.
+This generator creates daily advertising spend and sales with known changes, such as a pause or a budget increase. The known events let us check whether the detector finds the right periods.
 
-## How it works
+The repository already includes a sample in [data/](data/). You can run the viewer and sample checks without installing R.
 
-Two stages, one shared config:
+## How generation works
 
-1. **R: [`generate_with_simmmulator.R`](generate_with_simmmulator.R)**
-   Uses Meta's open-source [siMMMulator](https://github.com/facebookexperimental/siMMMulator)
-   package to simulate baseline sales, ad spend, adstock decay, and
-   diminishing returns for every channel and country listed in
-   [`config.yaml`](config.yaml). Before decay and saturation run, it injects
-   the patterns listed in [`events_config.yaml`](events_config.yaml) directly
-   into daily spend. Output: `raw_daily_wide.csv` (not committed, regenerate
-   it, see below).
+1. [The R script](generate_with_simmmulator.R) uses [siMMMulator](https://github.com/facebookexperimental/siMMMulator) to simulate spend and sales. It changes spend according to the configured events before calculating media response, lingering ad effects, and saturation.
+2. [The Python script](reformat.py) reshapes the output into the project's CSV format and writes the answers used for checking detections.
 
-2. **Python: [`reformat.py`](reformat.py)**
-   Reads the same `config.yaml`, and reshapes siMMMulator's wide per-country
-   output into the long `media.csv` / `sales.csv` format. Writes
-   `ground_truth.csv` (the answer key) and `true_roi.csv` (ground-truth ROI
-   per channel).
-
-**`config.yaml` and `events_config.yaml` are the only two config files, and
-both scripts read them directly.** Nothing about countries, channels, spend
-levels, or injected patterns is hardcoded separately in the R or Python code.
-See [`DETAILS.md`](DETAILS.md) for the full field reference.
+Both scripts read [config.yaml](config.yaml) for markets, channels, and simulation settings, and [events_config.yaml](events_config.yaml) for inserted events. See the [parameter reference](DETAILS.md) when changing them.
 
 ## Setup
 
-R needs the `siMMMulator` and `yaml` packages:
+Use the Python environment from the [main setup](../README.md#run-the-viewer). No second virtual environment is needed.
+
+To generate new data, also install R and run these commands in an R console:
+
 ```r
-install.packages(c("remotes", "yaml"))
+install.packages(c("remotes", "yaml", "dplyr"))
 remotes::install_github("facebookexperimental/siMMMulator")
 ```
 
-Python needs pandas, numpy, and PyYAML:
-```bash
-python3 -m venv .venv
-.venv/bin/pip install pandas numpy pyyaml
-```
+## Generate a separate sample
 
-## Usage
-
-Run from inside `synthetic_data_generator/`:
+With the Python environment active, start in the repository folder:
 
 ```bash
-Rscript generate_with_simmmulator.R
-.venv/bin/python reformat.py
+cd synthetic_data_generator
+Rscript generate_with_simmmulator.R --outdir generated
+python reformat.py --outdir generated
 ```
 
-This regenerates `raw_daily_wide.csv` and `data/media.csv`,
-`data/sales.csv`, `data/ground_truth.csv`, `data/true_roi.csv`. The `data/`
-files in this repo are already generated, so you can use the dataset without
-running R at all.
+Both commands use the same output directory. This writes a new sample to `generated/` and leaves the committed `data/` sample in place. To change the simulation, edit the YAML settings and rerun both commands.
 
-To change what gets generated (add a country, tune a channel's decay rate,
-add a new injected pattern), edit `config.yaml` or `events_config.yaml` and
-rerun both commands. No code changes needed for any of that.
+| Output | Contents |
+|---|---|
+| `raw_daily_wide.csv` | Intermediate output from R, read by Python. |
+| `media.csv` | Daily spend and media measurements by market and channel. |
+| `sales.csv` | Daily turnover split by market, customer type, and sales channel. |
+| `ground_truth.csv` | The inserted events, for evaluation only. |
+| `true_roi.csv` | Simulated attributed revenue divided by spend for each channel; not an estimate from real data. |
 
-## Output files: what you actually need
+## Events in the included sample
 
-| File | What it is | Required for the assignment? |
-|---|---|---|
-| `data/media.csv` | Daily media spend, impressions, clicks, conversions per channel, campaign, country | Yes, this is the data your detector reads. |
-| `data/sales.csv` | Daily turnover per country, customer type, sales channel | Yes, same as above. |
-| `data/ground_truth.csv` | Answer key: which periods were injected, where, and why | Testing aid only. Lets you check your detector's recall and precision before Sellforte's real, unlabeled dataset arrives. Not part of the real data. |
-| `data/true_roi.csv` | Ground-truth ROI per channel | Optional. Only meaningful because we generated the data ourselves. Real data has no ground-truth ROI, that's the whole point of MMM. |
+The configuration includes a German dark period, a Finnish period with only Google Search active, an Austrian Facebook holdout, a Swiss Google Search budget increase, three German Radio pauses, and a late US Instagram launch.
 
-## Injected informative periods
+Those are six grouped events: the three Radio pauses form one pulse train. Exact offsets and settings are in [events_config.yaml](events_config.yaml). For precise dates, use its day offsets; the legacy `ground_truth.csv` end dates do not consistently use the detector's inclusive convention.
 
-Defined in [`events_config.yaml`](events_config.yaml), applied to simulated
-spend before conversions are calculated:
-
-| pattern_id | pattern_type | country | channel | window |
-|---|---|---|---|---|
-| DE_DARK_01 | dark_period | DE | ALL | 2024-06-24 to 2024-08-17 |
-| FI_SINGLE_SEARCH_01 | single_channel | FI | Google Search | 2024-09-07 to 2024-10-06 |
-| AT_FACEBOOK_HOLDOUT_01 | natural_holdout | AT | Facebook | 2025-02-04 to 2025-03-18 |
-| CH_SEARCH_STEP_01 | step_change (3x) | CH | Google Search | 2025-05-15 to 2025-07-09 |
-| DE_RADIO_PULSE_01/02/03 | channel_pulse | DE | Radio | three 2-week off periods |
-| US_INSTAGRAM_LAUNCH_01 | staggered_launch | US | Instagram | off for first 90 days |
-
-The first four are the required patterns from the assignment brief. The last
-two are bonus patterns; the brief explicitly welcomes extra ones.
+For many scenarios instead of one sample, use the [benchmark generator](../benchmark/BENCHMARK.md).
