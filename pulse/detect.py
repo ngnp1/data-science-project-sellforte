@@ -1,4 +1,5 @@
-"""Score hook: media.csv in, channel_pulse, natural_holdout, single_channel and dark_period Events out.
+"""Score hook: media.csv in, channel_pulse, natural_holdout, single_channel, dark_period and
+staggered_launch Events out.
 
     python -m benchmark.eval.run_dev --detector pulse.detect:detect --load-data     # layer C (default)
     python -m benchmark.eval.run_dev --detector pulse.detect:detect_b --load-data   # layer B
@@ -11,7 +12,8 @@ import pandas as pd
 from benchmark.eval.model import Event
 from pulse.hsmm import p_off_hsmm
 from pulse.onoff import RHO, active_level, p_off, p_off_hmm
-from pulse.holdout import find_dark_periods, find_holdouts, find_single_channel, market_p_off
+from pulse.holdout import (find_dark_periods, find_holdouts, find_single_channel,
+                           find_staggered_launches, market_p_off)
 from pulse.pulse import find_pulse_trains, off_spells, pulse_probability
 
 
@@ -41,7 +43,7 @@ def detect(media_df, sales_df, sid: str, layer: str = "C") -> list[Event]:
         raise ValueError("pass --load-data so the detector gets media.csv")
     m = media_df.assign(date=pd.to_datetime(media_df["date"]))
     days = pd.date_range(m["date"].min(), m["date"].max())
-    events = []
+    events, markets, ps = [], {}, {}
     for country, mc in m.groupby("country_code"):
         market, spans = {}, {}
         for channel, g in mc.groupby("advertising_channel"):
@@ -54,7 +56,8 @@ def detect(media_df, sales_df, sid: str, layer: str = "C") -> list[Event]:
                                     event_type="channel_pulse", start=t.start, end=t.end,
                                     components=t.components, detection_confidence=prob,
                                     tags=tuple(f"spike_absorbed:{d.date()}" for d in spikes)))
-        p = market_p_off(market)
+        markets[country] = market
+        p = ps[country] = market_p_off(market)
         for kind, found in (("natural_holdout", find_holdouts(market, spans, p)),
                             ("single_channel", find_single_channel(market, p))):
             events += [Event(sid=sid, country_code=country, channel=channel, event_type=kind,
@@ -63,6 +66,9 @@ def detect(media_df, sales_df, sid: str, layer: str = "C") -> list[Event]:
         events += [Event(sid=sid, country_code=country, channel=None, event_type="dark_period",
                          start=a, end=b, detection_confidence=conf)
                    for a, b, conf in find_dark_periods(market, p)]
+    events += [Event(sid=sid, country_code=country, channel=channel, event_type="staggered_launch",
+                     start=a, end=b, detection_confidence=conf)
+               for country, channel, a, b, conf in find_staggered_launches(markets, ps)]
     return events
 
 

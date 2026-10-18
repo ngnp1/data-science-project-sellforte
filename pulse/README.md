@@ -378,6 +378,42 @@ Runtime: all detections together take 6–9 min for the full dev run on this mac
 shows it is all layer C, which runs twice per channel (pulse prior and holdout prior); a single
 2-year series takes ~0.1 s. If this matters, the first fix is capping spell lengths in C.
 
+## Staggered launch
+
+**Definition** (`benchmark/BENCHMARK.md:44`): a channel starts running later in some markets than
+in others. One event per late market, carrying that market's country (`benchmark/eval/README.md:41`),
+from the first day to the last day before launch.
+
+**Method** (`holdout.py: find_staggered_launches`, reusing every market's layer-C P(off)):
+1. A market's launch delay for a channel = its off spell starting on the first day (15 %-checked,
+   at least 7 days); 0 if the channel runs from the start.
+2. Report the market if the same channel ran at least 7 days earlier in another market. The 7-day
+   margin (`MIN_DAYS`) keeps 1-day boundary noise from turning same-day launches into a stagger;
+   if every market launches on the same day, nothing is reported.
+3. Confidence = mean P(off) over the pre-launch spell.
+
+No double reporting: the holdout detector already skips off spells starting on the first day.
+A channel that never spends in a market is not active there, so it is never a launch.
+
+**Dev scores** (test split untouched):
+
+| | teammate detection-library | this (layer C) |
+|---|---|---|
+| staggered_launch P / R / F1 | 0.909 / 1.000 / 0.952 (10 / 1 / 0) | 0.909 / 1.000 / 0.952 (10 / 1 / 0) |
+| boundary error (median / p90 days) | – | 0 / 0 |
+| dark_period | 12 / 0 / 0 | 12 / 0 / 0 (unchanged) |
+| natural_holdout | 16 / 3 / 4 | 17 / 3 / 3 (unchanged) |
+| single_channel | 7 / 0 / 3 | 7 / 0 / 3 (unchanged) |
+| channel_pulse | 10 / 0 / 0 | 10 / 0 / 0 (unchanged) |
+| null FP per country-year | – | 0.000 |
+
+Confidence for dark and launch detections: 0.992–1.000.
+
+The one FP, **dev_036 US Google Discovery** (day 1 to day 60), is labelled a natural holdout in the
+truth: the channel is off from the first day in the US while running in other markets. That is
+the launch definition word for word, so spend alone cannot tell the two apart; it is the same
+period that is the holdout FN. Full dev run: 4 min this time.
+
 ## Next steps
 
 1. Get pulses with wrong or low-confidence detections (a harder benchmark or real data) so the

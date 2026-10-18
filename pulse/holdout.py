@@ -91,3 +91,28 @@ def find_dark_periods(market: dict, p: dict | None = None) -> list[tuple]:
         if len(run) >= MIN_DAYS:
             out.append((a, b, float(np.mean([p[ch].loc[a:b].mean() for ch in p]))))
     return out
+
+
+def find_staggered_launches(markets: dict, ps: dict) -> list[tuple]:
+    """A channel starts running later in some markets than in others.
+
+    markets: {country: {channel: (spend, present)}}; ps: {country: market P(off)}.
+    A market's launch delay is its off spell starting on the first day (>= MIN_DAYS, 15 %
+    checked). It is a staggered launch if another market ran the same channel at least
+    MIN_DAYS earlier. Returns [(country, channel, start, end, confidence)].
+    """
+    delay, spell = {}, {}
+    for country, p in ps.items():
+        for ch, pc in p.items():
+            s, present = markets[country][ch]
+            first = [r for r in off_spells(pc, s, present, RHO * active_level(s)) if r[0] == s.index[0]]
+            n = (first[0][1] - first[0][0]).days + 1 if first else 0
+            delay[country, ch] = n if n >= MIN_DAYS else 0
+            if delay[country, ch]:
+                spell[country, ch] = first[0]
+    out = []
+    for (country, ch), (a, b, _) in spell.items():
+        n = delay[country, ch]
+        if any(o != country and c == ch and d <= n - MIN_DAYS for (o, c), d in delay.items()):
+            out.append((country, ch, a, b, float(ps[country][ch].loc[a:b].mean())))
+    return out

@@ -43,3 +43,14 @@ def test_dark_period_needs_every_channel_off():
     assert find_dark_periods({"A": _ch([(60, 42)]), "B": _ch()}) == []
     never = (pd.Series(0.0, index=DAYS), ON)                # a channel that never spends
     assert len(find_dark_periods({"A": _ch([(60, 42)]), "B": never})) == 1
+
+
+def test_staggered_launch_is_a_late_start_relative_to_another_market():
+    from pulse.holdout import find_staggered_launches, market_p_off
+    markets = {"X": {"A": _ch(), "B": _ch()}, "Y": {"A": _ch([(0, 60)]), "B": _ch()}}
+    ps = {c: market_p_off(mk) for c, mk in markets.items()}
+    [(country, ch, a, b, conf)] = find_staggered_launches(markets, ps)
+    assert (country, ch, a, b) == ("Y", "A", DAYS[0], DAYS[59]) and 0.9 < conf <= 1
+    assert find_holdouts(markets["Y"], {}, ps["Y"]) == []      # not also a holdout
+    same = {"X": {"A": _ch([(0, 60)])}, "Y": {"A": _ch([(0, 60)])}}
+    assert find_staggered_launches(same, {c: market_p_off(mk) for c, mk in same.items()}) == []
