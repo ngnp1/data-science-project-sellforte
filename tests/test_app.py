@@ -72,3 +72,19 @@ def test_upload_mode_waits_for_media():
     app.sidebar.radio[0].set_value("Upload CSV files").run()
     assert not app.exception
     assert any("Upload media" in m.value for m in app.info)
+
+
+def test_media_without_sales_renders_spend_only():
+    script = f"""
+import sys
+sys.path.insert(0, {str(Path(APP).parent)!r})
+import app
+media, _ = app.load_sample()
+app.load_sample = lambda: (media, None)
+app.main()
+"""
+    app = AppTest.from_string(script, default_timeout=60).run()
+    assert not app.exception
+    assert len(app.dataframe[0].value) == 6
+    assert set(app.dataframe[0].value["Sales vs comparison"]) == {"No sales reading"}
+    assert [m.label for m in app.metric][4:] == ["Affected spend/day"]
