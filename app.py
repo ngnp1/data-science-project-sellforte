@@ -188,10 +188,10 @@ def table(visible, rank, reads) -> None:
     # The rows shown are part of the key too: a filter change must not leave a
     # tick on whatever finding now sits at that row number.
     key = f"table-{st.session_state.get('table_nonce', 0)}-{zlib.crc32('|'.join(ids).encode())}"
-    # On screen the end date is left out so every column stays readable beside
-    # the sidebar; Start stays a real date so it sorts by time. The download
-    # keeps Start, End and Days.
-    shown = frame.drop(columns=["End"])
+    # On screen only what is needed to pick a period: no end date, evidence or
+    # data-quality column (warnings show in the panel). Start stays a real date
+    # so it sorts by time. The download keeps every column.
+    shown = frame.drop(columns=["End", "Evidence", "Data quality"])
     small = st.column_config.Column(width="small")
     st.dataframe(shown, hide_index=True, width="stretch", key=key,
                  height=35 * (min(len(shown), 10) + 1) + 3,

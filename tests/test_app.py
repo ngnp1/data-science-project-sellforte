@@ -297,7 +297,7 @@ def test_table_shows_a_sortable_start_date():
     app = run_app()
     frame = app.dataframe[0].value
     assert list(frame.columns) == ["Rank", "Market", "Pattern", "Channel", "Start", "Days",
-                                   "Priority", "Evidence", "Sales change", "Data quality"]
+                                   "Priority", "Sales change"]
     assert isinstance(frame["Start"].iloc[0], datetime.date)
 
 
