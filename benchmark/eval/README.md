@@ -1,91 +1,45 @@
-# Evaluating the detector
+# Evaluating a detector
 
-Evaluation compares detected events with known events in synthetic data. It checks both whether the right pattern was found and whether its dates overlap the expected window.
+Evaluation compares a detector's findings with the events inserted into synthetic data.
 
-## Run a check
-
-For the included sample, run from the repository folder with the Python environment active:
+## Run it
 
 ```bash
-python -m scripts.evaluate_sample
+python -m scripts.evaluate_sample                                                   # included sample
+python -m benchmark.eval.run_dev --detector benchmark.eval.adapter:detect --load-data   # dev split
 ```
 
-For the larger development split, first follow the [benchmark setup](../BENCHMARK.md#get-data-ready), then run:
+The dev split must be generated first ([setup](../BENCHMARK.md#get-data-ready)). Every dev run is appended to `dev_history.jsonl`. To score another detector, see [adding a detector](../../detectors/README.md#score-it).
 
-```bash
-python -m benchmark.eval.run_dev --detector benchmark.eval.adapter:detect --load-data
-```
+## How findings are matched
 
-You can repeat development runs. Each run is added to `dev_history.jsonl`.
+A finding matches an expected event when it has the same type, market and channel, and its dates overlap enough. Overlap is **IoU**: the shared days divided by all days covered by either window. A match needs an IoU of at least 0.5. Each finding and each expected event can be matched only once, and the matcher maximises the number of valid matches.
 
-## How events match
-
-A finding must have the correct event type, market, and channel. Its dates must also overlap the expected dates enough to count as a match.
-
-The overlap measure is **intersection over union (IoU)**: the number of days shared by both windows divided by the number of days covered by either window. For example, 10 shared days out of 15 total days gives an IoU of 0.67. The matching threshold is 0.5.
-
-The matcher takes the strongest overlaps first. Each finding can match only one expected event, and each expected event can match only one finding.
-
-| Metric | Plain-language meaning |
+| Metric | Meaning |
 |---|---|
-| Precision | Of the events reported, how many matched an expected event? |
-| Recall | Of the expected events, how many were found? |
-| F1 | A combined score that rewards both precision and recall. |
-| Boundary error | How far the reported start and end dates are from the expected dates. |
-| Null-scenario false positives | How often the detector reports events in data with no inserted events. |
+| Precision | Of the reported findings, the share that matched. |
+| Recall | Of the expected events, the share that were found. |
+| F1 | Combines precision and recall. |
+| Boundary error | Days between the reported and expected start and end dates. |
+| Null-scenario false positives | Findings reported in data with no inserted events. |
 
-Read the metrics together: finding nothing avoids false alarms but also misses every event. Built-in test detectors with perfect, empty, shifted, and incorrect answers check the evaluator's behavior.
+Read these together. A detector that reports nothing has no false alarms, but it also finds nothing.
 
-## Date and grouping rules
+## Conventions
 
-- **Dates:** both ends of an evaluation window are inclusive. Truth comes from `scenario.json`, converting the exclusive `end_day` to the last affected day. The legacy truth CSV uses a different end-date convention.
-- **Pulses:** several off-windows are grouped into one pulse event. Standard overlap scoring uses the group's outer window, so a good score alone does not prove each pause is correct. The sample check also verifies individual pulse windows.
-- **Global pauses:** these are evaluated as `dark_period` events; the detector can add a `global_pause` tag.
-- **Staggered launches:** return one event per affected market, rather than one event for all markets.
+- Both dates of a window are inclusive.
+- Several pauses of one pulse form a single event. Separate per-pause scores are reported as well.
+- A global pause counts as a `dark_period`.
+- A staggered launch is reported once per affected market.
+- Breakdowns by family, duration or noise are descriptive. Settings vary together, so they do not isolate causes.
+- The detector's confidence is a heuristic, not a probability, so reliability curves are not shown.
 
-## Interpret the results
+## Final evaluation
 
-Scenario breakdowns compare groups such as event family or noise level. Event breakdowns report recall by duration, magnitude, and zero versus near-zero spend. They do not report precision because an unmatched finding has no truth event to assign it to.
-
-These are descriptive comparisons. Some settings vary together, and simulated noise mainly affects sales and media response. A breakdown does not isolate the effect of one setting or establish robustness to noisy spend.
-
-Current confidence scores are heuristics, not probabilities. The adapter leaves probability confidence unset, so probability reliability curves are unavailable for this detector.
-
-## Final evaluation and historical results
-
-The final command is intended for the end of development, once the original sealed test files are available:
+At the end of development, with the original sealed test files in place:
 
 ```bash
 python -m benchmark.eval.run_final --detector benchmark.eval.adapter:detect --load-data --finalize
 ```
 
-It verifies the seal and appends a record to `final_runs.jsonl`, including hashes of the detector code and scenario specification. Repeating it creates another record; the flag does not enforce a single lifetime run. Preserve the original records and seal.
-
-The committed final-run log describes an older detector. It has not been rerun for the correctness fixes. The current sample result is a regression check, not a replacement for an unseen test result.
-
-`run_final.py` refuses to run without `--finalize`. It checks the test split's seal before reading anything. Then it records SHA-256 hashes of every Python file under `detection/` and `detectors/`, plus the sealed spec hash, to `final_runs.jsonl`. You can run it more than once, but every run after the first stays permanently visible in that file.
-
-`run_final.py` writes that record before it renders the report. A typo in `--out` cannot spend your one run without leaving a trace.
-
-## Evaluation corrections
-
-The matcher now maximizes the number of valid one-to-one matches. It starts
-with strongest overlaps and reassigns pairs when that allows more matches;
-it does not optimize total IoU among equally sized assignments.
-
-Pulse reports include separate precision, recall, and F1 for individual
-off-windows, plus coverage of actual off-days. Missing prediction components
-receive no component matches. Missing truth components are reported as an
-incomplete assessment. Read these metrics alongside grouped-event F1, which
-still measures the outer window and grouping.
-
-Day coverage F1 ignores event type and uses pulse envelopes. It measures timing
-coverage, not classification or individual pulse accuracy. Boundary and IoU
-statistics describe matched events only.
-
-The operating curve is unavailable when there are no predictions or any
-prediction lacks a confidence score. Headline metrics still include all
-predictions. Confidence reliability requires meaningful probability scores.
-
-These corrections can change scores. Preserve historical logs and compare
-versions using the same evaluator and dataset.
+It checks the seal before reading anything. It then records hashes of `detection/`, `detectors/` and the scenario specification in `final_runs.jsonl`, before printing the report. Every run stays visible in that file. The committed final run describes an older detector version.
