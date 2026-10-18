@@ -61,20 +61,6 @@ def test_pattern_filter_uses_plain_names():
     assert inspected(app).startswith("#4 · CH · Google Search budget step")
 
 
-def test_inspect_tabs_render_for_every_sample_finding():
-    app = run_app()
-    for rank in SAMPLE_IDS:
-        for tab in ("Readout", "Why flagged", "Caveats", "Explanation"):
-            app.session_state["inspect_tab"] = tab
-            inspect_finding(app, rank)
-            assert not app.exception, (rank, tab)
-            assert inspected(app).startswith(f"#{rank} ·")
-            # The map is always there; the finding's own charts only on Readout.
-            charts = len(app.get("plotly_chart"))
-            expected = 1 + (1 + (rank == 5) if tab == "Readout" else 0)
-            assert charts == expected, (rank, tab, charts)
-
-
 def test_empty_filters_show_a_message():
     app = run_app()
     app.sidebar.multiselect[0].set_value([]).run()
@@ -93,7 +79,8 @@ def test_media_without_sales_renders_spend_only():
     script = f"""
 import sys
 sys.path.insert(0, {str(Path(APP).parent)!r})
-import app
+import importlib, app
+app = importlib.reload(app)  # earlier tests patch the cached module
 media, _ = app.load_sample()
 app.load_sample = lambda: (media, None)
 app.main()
@@ -161,7 +148,8 @@ def test_selecting_outside_the_table_renews_its_key():
 import sys
 sys.path.insert(0, {str(Path(APP).parent)!r})
 import streamlit as st
-import app
+import importlib, app
+app = importlib.reload(app)  # earlier tests patch the cached module
 st.session_state["table_nonce"] = 0
 app.select("a")
 st.write(st.session_state["table_nonce"])
@@ -230,3 +218,161 @@ def test_kpi_tiles_empty_without_readout():
     _, panel, by_type = _analyzed()
     e, _ = by_type["dark_period"]
     assert viewer.kpi_tiles(e, None, panel) == []
+
+
+# --- shadcn props: AppTest exposes each component's kind and props as JSON. ---
+
+def shadcn(app: AppTest, kind: str | None = None) -> list[dict]:
+    import json
+    comps = [json.loads(c.proto.json) for c in app.get("bidi_component") if c.proto.json]
+    return [c for c in comps if kind is None or c["kind"] == kind]
+
+
+def element_nodes(app: AppTest) -> list[dict]:
+    def walk(nodes):
+        for n in nodes:
+            yield n
+            yield from walk(n.get("children", []))
+    return [n for c in shadcn(app, "elements") for n in walk(c["props"]["nodes"])]
+
+
+ROOT = str(Path(APP).parent)
+DE_ONLY = """
+m, s = app.load_sample()
+app.load_sample = lambda: (m[m.country_code == "DE"], s[s.country_code == "DE"])
+"""
+
+
+def run_patched(patch: str) -> AppTest:
+    script = (f"import sys\nsys.path.insert(0, {ROOT!r})\nimport importlib, app\n"
+              f"app = importlib.reload(app)\n{patch}\napp.main()\n")
+    return AppTest.from_string(script, default_timeout=60).run()
+
+
+def test_tab_default_never_moves_so_clicks_are_not_reset():
+    # shadcn treats a changed default as a server reset and drops the click
+    # the user just made, so the default must stay fixed across reruns.
+    app = run_app()
+    app.session_state["inspect_tab"] = "Caveats"
+    inspect_finding(app, 2)
+    tabs = shadcn(app, "tabs")[0]
+    assert tabs["state"]["serverRevision"] == 0
+    assert tabs["state"]["value"] == tabs["props"]["options"][0]["value"]
+
+
+def test_inspect_body_renders_each_tab_for_every_finding():
+    script = f"""
+import sys
+sys.path.insert(0, {ROOT!r})
+import streamlit as st
+import importlib, app
+app = importlib.reload(app)  # earlier tests patch the cached module
+from ui.labels import event_id
+events, panel, reads = app.analyze(*app.load_sample())
+e = next(x for x in events if event_id(x) == st.session_state["eid"])
+app.inspect_body(st.session_state["tab"], e, reads[event_id(e)], panel, False)
+"""
+    expected = {"Readout": "metric_card", "Why flagged": "elements",
+                "Caveats": "alert", "Explanation": "card"}
+    for eid in SAMPLE_IDS.values():
+        for tab, kind in expected.items():
+            app = AppTest.from_string(script, default_timeout=60)
+            app.session_state["eid"], app.session_state["tab"] = eid, tab
+            app.run()
+            assert not app.exception, (eid, tab)
+            assert {c["kind"] for c in shadcn(app)} == {kind}, (eid, tab)
+            assert bool(app.get("plotly_chart")) == (tab == "Readout"), (eid, tab)
+
+
+def test_cards_mark_the_selected_finding():
+    app = inspect_finding(run_app(), 2)
+    buttons = {n["id"].split("/")[-1]: n["props"] for n in element_nodes(app) if n["type"] == "button"}
+    assert buttons["inspect-2"]["text"] == "Inspecting" and buttons["inspect-2"]["variant"] == "default"
+    assert buttons["inspect-1"]["text"] == "Inspect" and buttons["inspect-1"]["variant"] == "outline"
+
+
+def test_cards_and_panel_surface_data_warnings():
+    app = run_patched(DE_ONLY)
+    assert not app.exception
+    badges = [b for n in element_nodes(app) if n["type"] == "badge" for b in n["props"]["badges"]]
+    assert {"text": "Data warning", "variant": "destructive"} in badges
+    # The data-quality alert sits above the tabs, so it shows on the default tab.
+    alerts = [c["props"] for c in shadcn(app, "alert")]
+    assert any(a["title"] == "Data quality" and a["variant"] == "destructive" for a in alerts)
+
+
+def test_why_flagged_draws_one_progress_row_per_score():
+    app = run_app()
+    app.session_state["eid"] = SAMPLE_IDS[1]
+    script = f"""
+import sys
+sys.path.insert(0, {ROOT!r})
+import importlib, app
+app = importlib.reload(app)  # earlier tests patch the cached module
+events, panel, reads = app.analyze(*app.load_sample())
+app.why_flagged(next(e for e in events if e.event_type == "dark_period"))
+"""
+    flagged = AppTest.from_string(script, default_timeout=60).run()
+    rows = [n for n in element_nodes(flagged) if n["type"] == "progress"]
+    assert len(rows) == 12 and all(0 <= r["props"]["value"] <= 100 for r in rows)
+
+
+def test_inspect_handler_survives_shadcn_event_binding():
+    script = f"""
+import sys
+sys.path.insert(0, {ROOT!r})
+import streamlit as st
+import importlib, app
+app = importlib.reload(app)  # earlier tests patch the cached module
+from streamlit_shadcn_ui.v2.elements import _invoke_callback
+st.session_state["table_nonce"] = 0
+_invoke_callback(app.inspect_handler("x"), object())
+st.write(st.session_state["table_nonce"], st.session_state["selected"])
+"""
+    app = AppTest.from_string(script, default_timeout=30).run()
+    assert not app.exception
+    assert [m.value.strip("`") for m in app.markdown] == ["1", "x"] or \
+        "1" in app.markdown[0].value and "x" in app.markdown[0].value
+
+
+def test_caption_counts_caveats_and_none_copy_matches_spec():
+    app = inspect_finding(run_app(), 6)          # US launch touches the data start
+    assert "1 caveat" in app.caption[-1].value or any("1 caveat" in c.value for c in app.caption)
+    script = f"""
+import sys
+sys.path.insert(0, {ROOT!r})
+import importlib, app
+app = importlib.reload(app)  # earlier tests patch the cached module
+events, panel, reads = app.analyze(*app.load_sample())
+e = next(x for x in events if x.event_type == "dark_period")
+app.caveat_alerts(e, reads[app.event_id(e)])
+"""
+    none = AppTest.from_string(script, default_timeout=60).run()
+    assert [c["props"]["title"] for c in shadcn(none, "alert")] == ["No caveats found for this finding."]
+
+
+def test_rough_return_description_says_when_it_was_withheld():
+    from dataclasses import replace
+    import app as viewer
+    _, panel, by_type = _analyzed()
+    e, r = by_type["dark_period"]
+    tiles = {t["label"]: t for t in viewer.kpi_tiles(e, replace(r, readable=True, rough_return=None), panel)}
+    assert "withheld" in tiles["Rough return"]["description"]
+    tiles = {t["label"]: t for t in viewer.kpi_tiles(e, replace(r, readable=False, rough_return=None), panel)}
+    assert "readable" in tiles["Rough return"]["description"]
+
+
+def test_kpi_descriptions_keep_channel_names_as_written():
+    import app as viewer
+    _, panel, by_type = _analyzed()
+    e, r = by_type["step_change"]
+    assert viewer.kpi_tiles(e, r, panel)[0]["description"].startswith("Google Search:")
+
+
+def test_table_shows_a_sortable_start_date():
+    import datetime
+    app = run_app()
+    frame = app.dataframe[0].value
+    assert list(frame.columns) == ["Rank", "Market", "Finding", "Channel", "Start", "Days",
+                                   "Priority", "Evidence", "Sales change", "Data quality"]
+    assert isinstance(frame["Start"].iloc[0], datetime.date)

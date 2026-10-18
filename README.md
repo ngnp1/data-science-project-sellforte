@@ -26,9 +26,11 @@ The viewer opens with the included sample, on one page read from top to bottom:
 
 1. **Summary and period map.** How many findings there are, and a timeline with one row per market showing where each finding sits. Click a bar to inspect it.
 2. **Ranked findings.** The three most informative findings appear as cards, and the rest follow in a table. Click a card's *Inspect* button or a table row to inspect a finding. *Download findings* saves the table as CSV.
-3. **Inspect panel.** What the period lets you measure, a rough sales readout, daily spend by channel above sales compared with other markets, and expandable sections for the scores, caveats and the detector's own explanation. Pulses also get a chart of sales around each pause.
+3. **Inspect panel.** What the period lets you measure, then four tabs. *Readout* shows a rough sales readout and daily spend by channel above sales compared with other markets; pulses also get a chart of sales around each pause. *Why flagged* shows the scores in plain words. *Caveats* lists what to keep in mind, and *Explanation* shows the detector's own text. A data-quality warning always shows above the tabs.
 
 Use the sidebar to filter by market or pattern type, hide findings with data warnings, or upload your own CSV files.
+
+The look comes from [shadcn/ui](https://ui.shadcn.com) components, through the `streamlit-shadcn-ui` package, and a matching theme in `.streamlit/config.toml`.
 
 ## Use your own data
 

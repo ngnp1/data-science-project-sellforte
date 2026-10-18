@@ -22,6 +22,10 @@ from ui.readout import readout
 SAMPLE = Path(__file__).parent / "synthetic_data_generator/data"
 ROUGH = "Rough reading, not a causal estimate."
 TABS = ("Readout", "Why flagged", "Caveats", "Explanation")
+DEFINITIONS = ("Vs comparison is the sales change the comparison markets did not share; it "
+               "counts as readable when it is at least twice the typical swing at other "
+               "times of year. Rough return is extra sales per extra 1 spent, shown only for "
+               "a readable change where spend moved by at least 10%.")
 CARRYOVER_NOTE = ("Averages over the whole window understate a pause's effect, "
                   "because advertising keeps working for a while after it stops.")
 
@@ -249,14 +253,15 @@ def table(visible, rank, reads) -> None:
     # The rows shown are part of the key too: a filter change must not leave a
     # tick on whatever finding now sits at that row number.
     key = f"table-{st.session_state.get('table_nonce', 0)}-{zlib.crc32('|'.join(ids).encode())}"
-    # On screen, one Period column instead of Start/End/Days keeps every column
-    # readable beside the sidebar; the download keeps all three.
-    shown = frame.drop(columns=["Start", "End", "Days"])
-    shown.insert(4, "Period", [f"{fmt_day(e.start)} · {e.n_days} days" for e in visible])
+    # On screen the end date is left out so every column stays readable beside
+    # the sidebar; Start stays a real date so it sorts by time. The download
+    # keeps Start, End and Days.
+    shown = frame.drop(columns=["End"])
     small = st.column_config.Column(width="small")
     st.dataframe(shown, hide_index=True, width="stretch", key=key,
-                 height=35 * (len(shown) + 1) + 3,
-                 column_config={c: small for c in ("Rank", "Market")},
+                 height=35 * (min(len(shown), 10) + 1) + 3,
+                 column_config={"Start": st.column_config.DateColumn(format="D MMM YYYY"),
+                                **{c: small for c in ("Rank", "Market", "Days")}},
                  on_select=partial(pick_from_table, key), selection_mode="single-row")
     export = frame.assign(
         **{"Priority score": [e.informativeness for e in visible],
@@ -279,7 +284,7 @@ def kpi_tiles(e, r, panel) -> list[dict]:
         return f"{change} ({compact(before)}/day)"
 
     tiles = [dict(label="Affected spend/day", value=compact(r.spend_during),
-                  description=f"{subject_label(e, r).capitalize()}: "
+                  description=f"{subject_label(e, r)[:1].upper()}{subject_label(e, r)[1:]}: "
                               f"{versus(r.spend_during, r.spend_reference)}")]
     if r.sales_reference is not None:
         tiles.append(dict(label="Market sales/day", value=compact(r.sales_during),
@@ -294,6 +299,7 @@ def kpi_tiles(e, r, panel) -> list[dict]:
             label="Rough return",
             value=f"{r.rough_return:,.2f}" if r.rough_return is not None else "—",
             description="extra sales per extra 1 spent" if r.rough_return is not None
+            else "withheld for this finding — see the note below" if r.readable
             else "shown only for a readable change"))
     if e.event_type == "dark_period" and r.baseline is not None:
         tiles.append(dict(label="Baseline sales/day", value=compact(r.baseline),
@@ -325,7 +331,7 @@ def kpis(e, r, panel) -> None:
             "on-days": "the pulse's own on-days between pauses"}[r.reference_side]
     peers = ", ".join(r.comparison_markets) or "none"
     st.caption(f"{ROUGH} Reference window: {side}. Comparison markets: {peers}. "
-               f"{r.note} {CARRYOVER_NOTE}")
+               f"{r.note} {DEFINITIONS} {CARRYOVER_NOTE}")
 
 
 def why_flagged(e) -> None:
@@ -347,24 +353,14 @@ def why_flagged(e) -> None:
 def caveat_alerts(e, r) -> None:
     lines = caveats(e, r)
     if not lines:
-        ui.alert("No caveats found", "Nothing unusual was found around this finding.",
-                 key="caveat-none")
+        ui.alert("No caveats found for this finding.", key="caveat-none")
     for i, line in enumerate(lines):
         flagged = line.startswith("Data quality")
         ui.alert("Data quality" if flagged else "Keep in mind", line,
                  variant="destructive" if flagged else "default", key=f"caveat-{i}")
 
 
-def inspect(e, r, rank, panel, dark) -> None:
-    info = TYPES[e.event_type]
-    st.subheader(f"#{rank} · {title(e)}")
-    st.caption(f"{info.name} · {fmt_day(e.start)} – {fmt_day(e.end)} · {e.n_days} days · "
-               f"Priority {priority_band(e.informativeness)} · "
-               f"Evidence {evidence_band(e.detection_confidence)}")
-    ui.alert("What this lets you measure", info.measures, key="measures")
-    tab = ui.tabs(TABS, value=st.session_state.get("inspect_tab", TABS[0]),
-                  key="inspect-tabs") or TABS[0]
-    st.session_state["inspect_tab"] = tab
+def inspect_body(tab, e, r, panel, dark) -> None:
     if tab == "Readout":
         kpis(e, r, panel)
         st.plotly_chart(event_chart(e, panel, r, dark), key="detail", width="stretch")
@@ -378,6 +374,26 @@ def inspect(e, r, rank, panel, dark) -> None:
         caveat_alerts(e, r)
     else:
         ui.card(title="Detector's explanation", content=e.explanation, key="explanation")
+
+
+def inspect(e, r, rank, panel, dark) -> None:
+    info = TYPES[e.event_type]
+    found = caveats(e, r)
+    st.subheader(f"#{rank} · {title(e)}")
+    count = (f" · {len(found)} caveat{'s' if len(found) > 1 else ''} — see the Caveats tab"
+             if found else "")
+    st.caption(f"{info.name} · {fmt_day(e.start)} – {fmt_day(e.end)} · {e.n_days} days · "
+               f"Priority {priority_band(e.informativeness)} · "
+               f"Evidence {evidence_band(e.detection_confidence)}{count}")
+    if e.validity != "ok":
+        # A data-quality flag can undo every number below, so it never hides in a tab.
+        ui.alert("Data quality", next(line for line in found if line.startswith("Data quality")),
+                 variant="destructive", key="data-quality")
+    ui.alert("What this lets you measure", info.measures, key="measures")
+    # No `value=`: shadcn treats a changed default as a server reset and drops
+    # the user's click, so the tab's own state is the only source of truth.
+    tab = ui.tabs(TABS, key="inspect-tabs") or TABS[0]
+    inspect_body(tab, e, r, panel, dark)
 
 
 def main():
