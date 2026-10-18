@@ -486,9 +486,9 @@ def test_a_restart_after_a_trickle_pause_is_not_a_permanent_step():
     not zero -- followed by spend resuming at its old level. The rise out of
     the pause has a finite ratio (about 17x the trickle), so nothing used to
     mark it as a restart: it went unpaired and was reported as a budget step
-    running to the end of the data (dev_012, dev_032). Against the channel's
+    running to the end of the data. Against the channel's
     own earlier active level nothing changed, so no open-ended step may start
-    at the restart."""
+    at the restart.""" 
     rng = np.random.default_rng(11)
     values = noisy(1000.0, 200, rng) + noisy(60.0, 60, rng) + noisy(1000.0, 200, rng)
     series = s(values)
@@ -501,16 +501,17 @@ def test_a_restart_after_a_trickle_pause_is_not_a_permanent_step():
 
 
 def test_the_end_of_a_temporary_bump_is_not_a_permanent_step():
-    """A bump phased in too gradually for its opening to read as a step, then
-    cut back sharply. Only the cut is detected; unpaired, it used to run to the
-    end of the data as a permanent step DOWN (dev_029, and the same shape at
-    smaller size in dev_003 and dev_040), although spend simply returned to
-    where it had been for most of the history."""
+    """A short bump phased in too gradually for its opening to read as a step,
+    then cut back sharply. Only the cut is detected; unpaired, it used to run
+    to the end of the data as a permanent step DOWN, although spend simply
+    returned to where it had been. "Short" means under half of
+    REFERENCE_DAYS, so the bump cannot set the reference level."""
     rng = np.random.default_rng(12)
     ramp = list(np.linspace(100.0, 160.0, 14))
-    values = noisy(100.0, 300, rng) + ramp + noisy(160.0, 40, rng) + noisy(100.0, 200, rng)
+    values = noisy(100.0, 300, rng) + ramp + noisy(160.0, 21, rng) + noisy(100.0, 200, rng)
+    assert 14 + 21 < params.REFERENCE_DAYS / 2
     series = s(values)
-    cut = series.index[354]
+    cut = series.index[335]
     shifts = find_level_shifts(series)
     assert any(sh.delta < 0 and abs((sh.at - cut).days) <= 3 for sh in shifts), (
         "fixture must detect the sharp cut back to normal")
@@ -526,3 +527,37 @@ def test_a_genuine_permanent_step_after_a_long_history_survives():
     series = s(noisy(100.0, 300, rng) + noisy(250.0, 200, rng))
     episodes = find_step_episodes(series)
     assert any(e.open_ended and 2.0 < e.ratio < 3.0 for e in episodes)
+
+
+def _open_step_near(episodes, at, days=5):
+    return any(e.open_ended and abs((e.start - at).days) <= days for e in episodes)
+
+
+def test_a_permanent_cut_after_a_long_upward_trend_survives():
+    """Spend trending up for 500 days, then cut for good. Against the whole
+    earlier history the new level looks ordinary; against the recent level it
+    is a clear cut, which is what an analyst would call it."""
+    rng = np.random.default_rng(21)
+    trend = list(np.linspace(100.0, 200.0, 500) * (1 + rng.normal(0, 0.05, 500)))
+    series = s(trend + noisy(120.0, 200, rng))
+    assert _open_step_near(find_step_episodes(series), series.index[500])
+
+
+def test_a_permanent_rise_after_a_long_decline_survives():
+    rng = np.random.default_rng(22)
+    decline = list(np.linspace(200.0, 100.0, 500) * (1 + rng.normal(0, 0.05, 500)))
+    series = s(decline + noisy(160.0, 200, rng))
+    assert _open_step_near(find_step_episodes(series), series.index[500])
+
+
+def test_a_staircase_keeps_its_last_step():
+    rng = np.random.default_rng(23)
+    series = s(noisy(100.0, 400, rng) + noisy(300.0, 150, rng) + noisy(200.0, 200, rng))
+    assert _open_step_near(find_step_episodes(series), series.index[550])
+
+
+def test_a_bump_that_settles_at_a_new_level_keeps_its_cut():
+    rng = np.random.default_rng(24)
+    ramp = list(np.linspace(100.0, 300.0, 14))
+    series = s(noisy(100.0, 300, rng) + ramp + noisy(300.0, 40, rng) + noisy(160.0, 200, rng))
+    assert _open_step_near(find_step_episodes(series), series.index[354], days=3)

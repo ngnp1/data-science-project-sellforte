@@ -129,33 +129,39 @@ def _smoothed(s: pd.Series) -> np.ndarray:
 def _holds_against_history(s: pd.Series, shift: LevelShift,
                            exclude: list[tuple[pd.Timestamp, pd.Timestamp]],
                            smear: pd.Timedelta) -> bool:
-    """Does an UNPAIRED shift still stand against the channel's whole earlier
-    active history, not just the W days before it?
+    """Does an UNPAIRED shift still stand against the channel's recent active
+    level, not just the W days before it?
 
     An open-ended episode claims the level moved for good. Its z, persistence
     and ratio all compare against the W days just before the shift, and those
     days can themselves be the abnormal stretch: a pause at a trickle (below
     the off threshold but not zero, so the rise out of it has a finite ratio
-    and nothing marks it as a restart -- dev_012, dev_032), or a temporary
-    bump or dip whose opening was too gradual to detect, so only the return to
-    normal is seen (dev_029, dev_003, dev_040). Read against the earlier
-    history, with the excluded off-windows left out, both are spend returning
-    to where it had been, not a new budget level.
+    and nothing marks it as a restart), or a short bump or dip whose opening
+    was too gradual to detect, so only the return to normal is seen. Read
+    against the last REFERENCE_DAYS active days -- off-windows left out, so a
+    restart is compared with the level before the pause -- both are spend
+    returning to where it had been, not a new budget level.
+
+    The reference is bounded on purpose. Against the WHOLE earlier history a
+    genuine permanent change after a long trend, or the second step of a
+    staircase, looks ordinary and would be dropped; the last quarter of active
+    spend is what "the previous level" means to an analyst.
 
     The same bar persistence uses applies: the level over the rest of the
-    series must differ from the earlier history by at least PERSIST_FRACTION
-    of the shift, in the same direction. A channel with no earlier active day
-    -- a launch -- has no history to judge against and is left to the
-    composition layer, as before.
+    series must differ from the reference by at least PERSIST_FRACTION of the
+    shift, in the same direction. A channel with no earlier active day -- a
+    launch -- has nothing to judge against and is left to the composition
+    layer, as before.
     """
     t = shift.index
-    before = np.ones(t, dtype=bool)
+    active = np.ones(t, dtype=bool)
     for lo, hi in exclude:
-        before &= ~((s.index[:t] >= lo - smear) & (s.index[:t] <= hi + smear))
-    if not before.any():
+        active &= ~((s.index[:t] >= lo - smear) & (s.index[:t] <= hi + smear))
+    reference = np.flatnonzero(active)[-params.REFERENCE_DAYS:]
+    if not len(reference):
         return True
     y = _smoothed(s)
-    held = float(np.median(y[t:]) - np.median(y[:t][before]))
+    held = float(np.median(y[t:]) - np.median(y[reference]))
     return (np.sign(held) == np.sign(shift.delta)
             and abs(held) >= abs(shift.delta) * params.PERSIST_FRACTION)
 
