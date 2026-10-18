@@ -13,26 +13,39 @@ def inspected(app: AppTest) -> str:
     return app.subheader[-1].value
 
 
+SAMPLE_IDS = {  # rank -> event id on the included sample
+    1: "DE|ALL|dark_period|2024-06-24",
+    2: "FI|Google Search|single_channel|2024-09-07",
+    3: "AT|Facebook|natural_holdout|2025-02-04",
+    4: "CH|Google Search|step_change|2025-05-16",
+    5: "DE|Radio|channel_pulse|2024-02-10",
+    6: "US|Instagram|staggered_launch|2024-01-01",
+}
+
+
+def inspect_finding(app: AppTest, rank: int) -> AppTest:
+    # AppTest cannot click shadcn buttons; selecting through session state
+    # exercises the same render path the card's Inspect button leads to.
+    app.session_state["selected"] = SAMPLE_IDS[rank]
+    return app.run()
+
+
 def test_sample_loads_ranks_and_inspects_the_top_finding():
     app = run_app()
     assert not app.exception
     assert len(app.dataframe[0].value) == 6
     assert list(app.dataframe[0].value["Rank"]) == [1, 2, 3, 4, 5, 6]
     assert inspected(app).startswith("#1 · DE · All advertising off")
-    assert [m.label for m in app.metric][:4] == [
-        "Findings", "Markets with findings", "High priority", "With data warnings"]
 
 
-def test_card_button_switches_the_inspected_finding():
-    app = run_app()
-    app.button(key="inspect-2").click().run()
+def test_selecting_a_finding_switches_the_inspect_panel():
+    app = inspect_finding(run_app(), 2)
     assert not app.exception
     assert inspected(app).startswith("#2 · FI · Only Google Search on")
 
 
 def test_market_filter_narrows_and_hidden_selection_falls_back():
-    app = run_app()
-    app.button(key="inspect-2").click().run()
+    app = inspect_finding(run_app(), 2)
     app.sidebar.multiselect[0].set_value(["AT"]).run()
     assert not app.exception
     assert len(app.dataframe[0].value) == 1
@@ -48,16 +61,18 @@ def test_pattern_filter_uses_plain_names():
     assert inspected(app).startswith("#4 · CH · Google Search budget step")
 
 
-def test_every_sample_finding_renders_its_inspect_panel():
+def test_inspect_tabs_render_for_every_sample_finding():
     app = run_app()
-    for rank in range(1, 4):
-        app.button(key=f"inspect-{rank}").click().run()
-        assert not app.exception
-    app.sidebar.multiselect[0].set_value(["DE", "US"]).run()
-    for rank in (5, 6):
-        app.button(key=f"inspect-{rank}").click().run()
-        assert not app.exception
-        assert inspected(app).startswith(f"#{rank} ·")
+    for rank in SAMPLE_IDS:
+        for tab in ("Readout", "Why flagged", "Caveats", "Explanation"):
+            app.session_state["inspect_tab"] = tab
+            inspect_finding(app, rank)
+            assert not app.exception, (rank, tab)
+            assert inspected(app).startswith(f"#{rank} ·")
+            # The map is always there; the finding's own charts only on Readout.
+            charts = len(app.get("plotly_chart"))
+            expected = 1 + (1 + (rank == 5) if tab == "Readout" else 0)
+            assert charts == expected, (rank, tab, charts)
 
 
 def test_empty_filters_show_a_message():
@@ -87,7 +102,6 @@ app.main()
     assert not app.exception
     assert len(app.dataframe[0].value) == 6
     assert set(app.dataframe[0].value["Sales change"]) == {"No sales reading"}
-    assert [m.label for m in app.metric][4:] == ["Affected spend/day"]
 
 
 def _single_market_readouts():
@@ -133,16 +147,29 @@ def test_baseline_help_only_claims_a_share_when_it_is_readable_and_negative():
     assert "went with advertising" not in viewer.baseline_help(replace(r, effect=-0.38, readable=False))
 
 
-def test_table_starts_fresh_when_the_selection_changes_elsewhere():
+def test_table_starts_fresh_when_its_rows_change():
     # A keyed st.dataframe keeps its row ticks across reruns; a new key is the
     # only way to stop a stale tick pointing at a different finding.
     app = run_app()
     first = app.dataframe[0].key
-    app.button(key="inspect-2").click().run()
-    second = app.dataframe[0].key
-    assert second != first
     app.sidebar.multiselect[0].set_value(["AT", "FI"]).run()
-    assert app.dataframe[0].key not in (first, second)
+    assert app.dataframe[0].key != first
+
+
+def test_selecting_outside_the_table_renews_its_key():
+    script = f"""
+import sys
+sys.path.insert(0, {str(Path(APP).parent)!r})
+import streamlit as st
+import app
+st.session_state["table_nonce"] = 0
+app.select("a")
+st.write(st.session_state["table_nonce"])
+app.select("b", from_table=True)
+st.write(st.session_state["table_nonce"])
+"""
+    app = AppTest.from_string(script, default_timeout=30).run()
+    assert [m.value.strip("`") for m in app.markdown] == ["1", "1"]
 
 
 def _analyzed(markets=None, with_sales=True):
@@ -177,7 +204,7 @@ def test_summary_cards_on_the_sample():
     events, panel, _ = _analyzed()
     assert viewer.summary_cards(events, panel.countries) == [
         ("Findings", "6", "in 5 markets"),
-        ("Markets with findings", "5 of 5", "markets with at least one finding"),
+        ("Markets with findings", "5 of 5", "with a finding"),
         ("High priority", "5", "priority score ≥ 0.75"),
         ("With data warnings", "0", "check before using"),
     ]

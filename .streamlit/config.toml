@@ -13,7 +13,9 @@ textColor = "#09090b"
 borderColor = "#e4e4e7"
 
 [theme.dark]
-primaryColor = "#fafafa"
+# shadcn's dark primary is near-white, but Streamlit puts white text on
+# primary-coloured chips, so zinc-600 keeps the sidebar filters readable.
+primaryColor = "#52525b"
 backgroundColor = "#09090b"
 secondaryBackgroundColor = "#18181b"
 textColor = "#fafafa"

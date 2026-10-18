@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+import streamlit_shadcn_ui as ui
 
 from detection.io.panel import build_panel
 from detection.pipeline import run_detection
@@ -20,6 +21,7 @@ from ui.readout import readout
 
 SAMPLE = Path(__file__).parent / "synthetic_data_generator/data"
 ROUGH = "Rough reading, not a causal estimate."
+TABS = ("Readout", "Why flagged", "Caveats", "Explanation")
 CARRYOVER_NOTE = ("Averages over the whole window understate a pause's effect, "
                   "because advertising keeps working for a while after it stops.")
 
@@ -111,7 +113,7 @@ def headline(e, r) -> str:
     if r is None or r.sales_reference is None:
         return "No sales reading available"
     if r.baseline is not None:
-        return f"Baseline sales with no advertising ≈ **{r.baseline:,.0f}**/day"
+        return f"No-ads baseline ≈ **{r.baseline:,.0f}**/day"
     if r.swing is None:
         return "Too little history to judge the sales change"
     if not r.readable:
@@ -174,8 +176,7 @@ def summary_cards(visible, markets) -> list[tuple[str, str, str]]:
     with_findings = len({e.country_code for e in visible})
     return [
         ("Findings", str(len(visible)), f"in {with_findings} markets"),
-        ("Markets with findings", f"{with_findings} of {len(markets)}",
-         "markets with at least one finding"),
+        ("Markets with findings", f"{with_findings} of {len(markets)}", "with a finding"),
         ("High priority", str(sum(priority_band(e.informativeness) == "High" for e in visible)),
          "priority score ≥ 0.75"),
         ("With data warnings", str(sum(e.validity != "ok" for e in visible)),
@@ -195,25 +196,38 @@ def card_badges(e) -> list[tuple[str, str]]:
 
 def summary(visible, markets) -> None:
     for col, (label, value, description) in zip(st.columns(4), summary_cards(visible, markets)):
-        col.metric(label, value, help=description)
+        with col:
+            ui.metric_card(label, value, description=description, key=f"summary-{label}")
 
 
-def cards(visible, rank, reads, selected, dark) -> None:
-    for col, e in zip(st.columns(3), visible[:3]):
-        eid = event_id(e)
-        info = TYPES[e.event_type]
-        with col.container(border=True):
-            dot = info.color_dark if dark else info.color
-            st.markdown(f"<span style='color:{dot}'>●</span> **#{rank[eid]} · {title(e)}**",
-                        unsafe_allow_html=True)
-            st.caption(f"{fmt_day(e.start)} – {fmt_day(e.end)} · {e.n_days} days")
-            st.markdown(f"Priority **{priority_band(e.informativeness)}** · "
-                        f"Evidence **{evidence_band(e.detection_confidence)}**")
-            st.markdown(headline(e, reads[eid]))
-            st.button("Inspecting" if eid == selected else "Inspect",
-                      key=f"inspect-{rank[eid]}", on_click=select, args=(eid,),
-                      type="primary" if eid == selected else "secondary",
-                      width="stretch")
+def inspect_handler(eid: str):
+    """A zero-argument click handler: shadcn passes its click event to any
+    callback that can take one, which would land in select()'s from_table."""
+    def handler() -> None:
+        select(eid)
+    return handler
+
+
+def cards(visible, rank, reads, selected) -> None:
+    with ui.elements(key="top-findings") as el:
+        with el.grid(columns=3, gap="md"):
+            for e in visible[:3]:
+                eid, n = event_id(e), rank[event_id(e)]
+                chosen = eid == selected
+                with el.card(key=f"card-{n}"):
+                    with el.card_header():
+                        el.heading(f"#{n} · {title(e)}", level=4)
+                        el.text(f"{fmt_day(e.start)} – {fmt_day(e.end)} · {e.n_days} days",
+                                variant="muted")
+                    with el.card_content():
+                        with el.stack(direction="horizontal", gap="sm", wrap=True):
+                            for text, variant in card_badges(e):
+                                el.badge(text, variant=variant)
+                        el.text(headline(e, reads[eid]).replace("**", ""))
+                    with el.card_footer():
+                        el.button("Inspecting" if chosen else "Inspect", key=f"inspect-{n}",
+                                  variant="default" if chosen else "outline", stretch=True,
+                                  on_click=inspect_handler(eid))
 
 
 def table(visible, rank, reads) -> None:
@@ -235,7 +249,14 @@ def table(visible, rank, reads) -> None:
     # The rows shown are part of the key too: a filter change must not leave a
     # tick on whatever finding now sits at that row number.
     key = f"table-{st.session_state.get('table_nonce', 0)}-{zlib.crc32('|'.join(ids).encode())}"
-    st.dataframe(frame, hide_index=True, width="stretch", key=key,
+    # On screen, one Period column instead of Start/End/Days keeps every column
+    # readable beside the sidebar; the download keeps all three.
+    shown = frame.drop(columns=["Start", "End", "Days"])
+    shown.insert(4, "Period", [f"{fmt_day(e.start)} · {e.n_days} days" for e in visible])
+    small = st.column_config.Column(width="small")
+    st.dataframe(shown, hide_index=True, width="stretch", key=key,
+                 height=35 * (len(shown) + 1) + 3,
+                 column_config={c: small for c in ("Rank", "Market")},
                  on_select=partial(pick_from_table, key), selection_mode="single-row")
     export = frame.assign(
         **{"Priority score": [e.informativeness for e in visible],
@@ -290,11 +311,14 @@ def kpi_tiles(e, r, panel) -> list[dict]:
 
 def kpis(e, r, panel) -> None:
     if r is None:
-        st.info("Not enough data around this period for a sales reading.")
+        ui.alert("No sales reading", "Not enough data around this period for a sales reading.",
+                 key="no-readout")
         return
     tiles = kpi_tiles(e, r, panel)
     for col, tile in zip(st.columns(len(tiles)), tiles):
-        col.metric(tile["label"], tile["value"], help=tile["description"], border=True)
+        with col:
+            ui.metric_card(tile["label"], tile["value"], description=tile["description"],
+                           key=f"kpi-{tile['label']}")
 
     side = {"before": "the same number of days just before it",
             "after": "the same number of days just after it (the data starts too late for a before window)",
@@ -304,33 +328,56 @@ def kpis(e, r, panel) -> None:
                f"{r.note} {CARRYOVER_NOTE}")
 
 
+def why_flagged(e) -> None:
+    st.caption("Rule-based scores from 0 to 1, not probabilities.")
+    groups = (("Evidence that it happened", "confidence_sub_scores", "evidence"),
+              ("How useful it is", "informativeness_drivers", "usefulness"))
+    for col, (heading, field, key) in zip(st.columns(2), groups):
+        with col, ui.elements(key=f"scores-{key}") as el:
+            with el.card():
+                with el.card_header():
+                    el.heading(heading, level=4)
+                with el.card_content():
+                    with el.stack(gap="md"):
+                        for name, meaning, value in score_rows(e.evidence.get(field, {})):
+                            el.progress(round(value * 100), label=f"{name} · {value:.2f}")
+                            el.text(meaning, variant="muted")
+
+
+def caveat_alerts(e, r) -> None:
+    lines = caveats(e, r)
+    if not lines:
+        ui.alert("No caveats found", "Nothing unusual was found around this finding.",
+                 key="caveat-none")
+    for i, line in enumerate(lines):
+        flagged = line.startswith("Data quality")
+        ui.alert("Data quality" if flagged else "Keep in mind", line,
+                 variant="destructive" if flagged else "default", key=f"caveat-{i}")
+
+
 def inspect(e, r, rank, panel, dark) -> None:
     info = TYPES[e.event_type]
     st.subheader(f"#{rank} · {title(e)}")
     st.caption(f"{info.name} · {fmt_day(e.start)} – {fmt_day(e.end)} · {e.n_days} days · "
                f"Priority {priority_band(e.informativeness)} · "
                f"Evidence {evidence_band(e.detection_confidence)}")
-    st.markdown(f"**What this lets you measure:** {info.measures}")
-    kpis(e, r, panel)
-    st.plotly_chart(event_chart(e, panel, r, dark), key="detail", width="stretch")
-    after = carryover_chart(e, panel, r, dark)
-    if after is not None:
-        st.markdown("**Sales around each pause, averaged over the pauses**")
-        st.plotly_chart(after, key="carryover", width="stretch")
-    with st.expander("Why the tool flagged this"):
-        st.caption("Rule-based scores from 0 to 1, not probabilities.")
-        left, right = st.columns(2)
-        left.markdown("**Evidence that it happened**")
-        for name, _, value in score_rows(e.evidence.get("confidence_sub_scores", {})):
-            left.markdown(f"{name} · {value:.2f}")
-        right.markdown("**How useful it is**")
-        for name, _, value in score_rows(e.evidence.get("informativeness_drivers", {})):
-            right.markdown(f"{name} · {value:.2f}")
-    with st.expander("Caveats", expanded=bool(caveats(e, r))):
-        for line in caveats(e, r) or ["No caveats found for this finding."]:
-            st.markdown(f"- {line}")
-    with st.expander("Detector's explanation"):
-        st.write(e.explanation)
+    ui.alert("What this lets you measure", info.measures, key="measures")
+    tab = ui.tabs(TABS, value=st.session_state.get("inspect_tab", TABS[0]),
+                  key="inspect-tabs") or TABS[0]
+    st.session_state["inspect_tab"] = tab
+    if tab == "Readout":
+        kpis(e, r, panel)
+        st.plotly_chart(event_chart(e, panel, r, dark), key="detail", width="stretch")
+        after = carryover_chart(e, panel, r, dark)
+        if after is not None:
+            st.markdown("**Sales around each pause, averaged over the pauses**")
+            st.plotly_chart(after, key="carryover", width="stretch")
+    elif tab == "Why flagged":
+        why_flagged(e)
+    elif tab == "Caveats":
+        caveat_alerts(e, r)
+    else:
+        ui.card(title="Detector's explanation", content=e.explanation, key="explanation")
 
 
 def main():
@@ -382,7 +429,7 @@ def main():
     st.markdown("#### Ranked findings")
     st.caption("Ranked by how informative each period is likely to be. Priority and evidence "
                "are bands of rule-based scores, not probabilities.")
-    cards(visible, rank, reads, selected, dark)
+    cards(visible, rank, reads, selected)
     table(visible, rank, reads)
 
     st.divider()
