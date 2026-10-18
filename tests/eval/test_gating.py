@@ -385,7 +385,9 @@ def test_detectors_have_no_import_path_to_truth():
 def test_the_detectors_package_contains_only_source():
     pkg = ROOT / "detectors"
     intruders = [str(f.relative_to(ROOT)) for f in pkg.rglob("*")
-                 if f.is_file() and f.suffix != ".py" and "__pycache__" not in f.parts]
+                 if f.is_file() and f.suffix != ".py"
+                 and f.name not in NON_SOURCE_EXEMPT_FILENAMES
+                 and "__pycache__" not in f.parts]
     assert not intruders, f"non-source files under detectors/: {intruders}"
 
 

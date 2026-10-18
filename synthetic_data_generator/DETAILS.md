@@ -1,6 +1,6 @@
 # Generator settings reference
 
-Use [config.yaml](config.yaml) to control the simulation and [events_config.yaml](events_config.yaml) to insert events. After editing either file, rerun both commands in the [generator guide](README.md#generate-a-separate-sample).
+Use [config.yaml](config.yaml) to control the simulation and [events_config.yaml](events_config.yaml) to insert events. After editing either file, rerun the two commands in the [generator guide](README.md#generate-a-separate-sample).
 
 ## General settings
 
