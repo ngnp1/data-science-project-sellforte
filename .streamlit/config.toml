@@ -1,0 +1,22 @@
+# shadcn/ui zinc tokens, so native Streamlit widgets match the shadcn components.
+[theme]
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+baseRadius = "0.5rem"
+showWidgetBorder = true
+
+[theme.light]
+primaryColor = "#18181b"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f4f4f5"
+textColor = "#09090b"
+borderColor = "#e4e4e7"
+
+[theme.dark]
+# shadcn's dark primary is near-white, but Streamlit puts white text on
+# primary-coloured chips, so zinc-600 keeps the sidebar filters readable.
+primaryColor = "#52525b"
+backgroundColor = "#09090b"
+secondaryBackgroundColor = "#18181b"
+textColor = "#fafafa"
+borderColor = "#27272a"

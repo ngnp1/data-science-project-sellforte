@@ -81,6 +81,7 @@ def main(argv=None) -> int:
         "detector": args.detector,
         "n_scenarios": results["n_scenarios"],
         "source_hash": source_hash(Path(__file__).resolve().parents[2] / "detection"),
+        "detectors_source_hash": source_hash(Path(__file__).resolve().parents[2] / "detectors"),
         "metrics": {"precision": o["precision"], "recall": o["recall"],
                     "f1": o["f1"], "mean_iou": results["iou"]["mean_iou"],
                     "null_fp_rate": results["null_fp_rate"]},

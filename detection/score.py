@@ -24,7 +24,7 @@ import pandas as pd
 
 from detection import params
 from detection.io.panel import Panel
-from detection.model import DetectedEvent
+from detection.model import DetectedEvent, subject_channels  # noqa: F401  (re-exported)
 from detection.primitives.zero_runs import OffRun, find_off_runs
 
 COUNTRY_LEVEL_TYPES = frozenset({"dark_period", "single_channel"})
@@ -41,21 +41,6 @@ def _covering_run(panel: Panel, country: str, channel: str,
         if overlap > best_overlap:
             best, best_overlap = run, overlap
     return best
-
-
-def subject_channels(event: DetectedEvent, panel: Panel) -> list[str]:
-    """The channels this event actually makes a claim about.
-
-    A dark period claims every channel in the market. A single_channel event
-    names the channel still RUNNING, so its subjects are all the others -- the
-    same inversion that produced a real defect in the cross-market layer.
-    """
-    country = event.country_code
-    if event.event_type == "dark_period":
-        return panel.channels_in(country)
-    if event.event_type == "single_channel":
-        return [ch for ch in panel.channels_in(country) if ch != event.channel]
-    return [event.channel] if event.channel else []
 
 
 def _magnitude_evidence(event: DetectedEvent, panel: Panel,

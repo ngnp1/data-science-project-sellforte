@@ -104,3 +104,34 @@ def test_the_adapter_carries_both_scores_across():
     e = to_event(d)
     assert e.detection_confidence == 0.83
     assert e.informativeness == 0.41
+
+
+def _sample():
+    data = ROOT / "synthetic_data_generator" / "data"
+    return pd.read_csv(data / "media.csv"), pd.read_csv(data / "sales.csv")
+
+
+def test_for_detector_runs_our_library_exactly_as_detect_did():
+    from benchmark.eval.adapter import for_detector
+    from detection.pipeline import run_detection
+    media, sales = _sample()
+    assert for_detector("rule_based")(media, sales, "sample") == \
+        [to_event(e) for e in run_detection(media, sales, "sample")]
+
+
+def test_for_detector_stamps_the_scenario_id():
+    from benchmark.eval.adapter import for_detector
+    media, sales = _sample()
+    assert {e.sid for e in for_detector("rule_based")(media, sales, "s-42")} == {"s-42"}
+
+
+def test_for_detector_rejects_an_unknown_key():
+    from benchmark.eval.adapter import for_detector
+    with pytest.raises(KeyError, match="rule_based"):
+        for_detector("nope")
+
+
+def test_for_detector_also_requires_the_media_frame():
+    from benchmark.eval.adapter import for_detector
+    with pytest.raises(ValueError, match="--load-data"):
+        for_detector("rule_based")(None, None, "dev_005")
