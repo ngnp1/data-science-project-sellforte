@@ -17,7 +17,9 @@ class Stub(Detector):
 
 @pytest.fixture
 def clean_registry(monkeypatch):
-    monkeypatch.setattr(registry, "_DETECTORS", dict(registry._DETECTORS))
+    """Only our detector registered, whatever else a later change adds, and
+    restored afterwards."""
+    monkeypatch.setattr(registry, "_DETECTORS", {"rule_based": registry.get("rule_based")})
 
 
 def test_our_library_is_the_default_detector():
@@ -50,3 +52,23 @@ def test_a_detector_must_implement_detect():
         key, name, event_types = "x", "X", frozenset()
     with pytest.raises(TypeError):
         Incomplete()
+
+
+
+def test_every_module_in_detectors_is_listed_for_registration():
+    """A detector module nobody imports never registers -- the README's steps
+    would silently do nothing. Every module in the package must be listed."""
+    import pathlib
+    import detectors
+    pkg = pathlib.Path(detectors.__file__).parent
+    modules = {f"detectors.{f.stem}" for f in pkg.glob("*.py")
+               if f.stem not in {"__init__", "base", "registry"}}
+    assert modules == set(registry.MODULES)
+
+
+def test_every_listed_module_registers_its_detectors():
+    import importlib
+    for name in registry.MODULES:
+        found = importlib.import_module(name).DETECTORS
+        assert found and all(isinstance(d, Detector) for d in found)
+        assert all(registry.get(d.key) is d for d in found)

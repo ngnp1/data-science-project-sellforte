@@ -45,11 +45,10 @@ Multiple campaign rows are summed for each day, market, and channel. Missing dai
 
 ## Plug in another detector
 
-The app and the evaluation harness run any detector registered in `detectors/`. Our rule-based library is one implementation (`detectors/rule_based.py`). To add another, subclass `Detector` and register it:
+The app and the evaluation harness run any detector registered in `detectors/`. Our rule-based library is one implementation (`detectors/rule_based.py`). To add another, create `detectors/my_detector.py`:
 
 ```python
 from detectors.base import Detector
-from detectors import registry
 
 class MyDetector(Detector):
     key = "my_detector"
@@ -59,10 +58,12 @@ class MyDetector(Detector):
     def detect(self, media, sales):
         ...  # return a list of detection.model.DetectedEvent
 
-registry.register(MyDetector())
+DETECTORS = [MyDetector()]
 ```
 
-A finding must name its market, type, channel (none for a dark period) and inclusive dates, plus the off-windows for a pulse. Scores, data-quality checks and explanations are optional; the app says when a detector leaves them out. Once two or more detectors are registered, a **Detector** picker appears in the sidebar. To score it on the development split, add `detect = for_detector("my_detector")` (from `benchmark.eval.adapter`) to a module and run `python -m benchmark.eval.run_dev --detector mymodule:detect --load-data`.
+Then add `"detectors.my_detector"` to `MODULES` in `detectors/registry.py`. A test fails if a module in `detectors/` is missing from that list, so a detector cannot be forgotten.
+
+A finding must name its market, type, channel (none for a dark period) and inclusive dates, plus the off-windows for a pulse. Scores and explanations are optional: the app shows "Unscored" and says when a detector gives no scores or explanation. Data-quality checks are optional too, but a finding's `validity` defaults to "ok", so a detector that does not check data quality has its findings shown as OK. Once two or more detectors are registered, a **Detector** picker appears in the sidebar. To score a detector on the development split, add `detect = for_detector("my_detector")` (from `benchmark.eval.adapter`) to a module and run `python -m benchmark.eval.run_dev --detector mymodule:detect --load-data`. The truth-isolation tests scan every registered detector's source, and each run record hashes `detectors/` as well as `detection/`.
 
 ## Check the results
 

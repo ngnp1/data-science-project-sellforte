@@ -16,3 +16,6 @@ class RuleBasedDetector(Detector):
     def detect(self, media: pd.DataFrame,
                sales: pd.DataFrame | None) -> list[DetectedEvent]:
         return run_detection(media, sales, sid="")
+
+
+DETECTORS = [RuleBasedDetector()]

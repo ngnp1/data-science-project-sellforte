@@ -28,7 +28,18 @@ def default() -> Detector:
     return next(iter(_DETECTORS.values()))
 
 
-# Our library is always available, and first, so it is the default.
-from detectors.rule_based import RuleBasedDetector  # noqa: E402
+# The modules that provide detectors, in order; each exposes a DETECTORS list.
+# Ours comes first, so it is the default. A detector module that is not listed
+# here is never imported and never registers -- tests/detectors/test_registry.py
+# fails if a file in this package is missing from the list.
+MODULES = ("detectors.rule_based",)
 
-register(RuleBasedDetector())
+
+def _load() -> None:
+    import importlib
+    for name in MODULES:
+        for detector in importlib.import_module(name).DETECTORS:
+            register(detector)
+
+
+_load()
