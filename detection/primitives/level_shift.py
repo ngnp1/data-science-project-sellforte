@@ -119,13 +119,53 @@ def _noise_sigma(before: np.ndarray, after: np.ndarray) -> float:
     return max(_robust_sigma(before), _robust_sigma(after))
 
 
+def _smoothed(s: pd.Series) -> np.ndarray:
+    """The scale-free series every gate here reads: log1p(spend / level),
+    smoothed by a centred rolling median."""
+    return scale_free(s).rolling(params.ROLLING, center=True,
+                                 min_periods=1).median().values
+
+
+def _holds_against_history(s: pd.Series, shift: LevelShift,
+                           exclude: list[tuple[pd.Timestamp, pd.Timestamp]],
+                           smear: pd.Timedelta) -> bool:
+    """Does an UNPAIRED shift still stand against the channel's whole earlier
+    active history, not just the W days before it?
+
+    An open-ended episode claims the level moved for good. Its z, persistence
+    and ratio all compare against the W days just before the shift, and those
+    days can themselves be the abnormal stretch: a pause at a trickle (below
+    the off threshold but not zero, so the rise out of it has a finite ratio
+    and nothing marks it as a restart -- dev_012, dev_032), or a temporary
+    bump or dip whose opening was too gradual to detect, so only the return to
+    normal is seen (dev_029, dev_003, dev_040). Read against the earlier
+    history, with the excluded off-windows left out, both are spend returning
+    to where it had been, not a new budget level.
+
+    The same bar persistence uses applies: the level over the rest of the
+    series must differ from the earlier history by at least PERSIST_FRACTION
+    of the shift, in the same direction. A channel with no earlier active day
+    -- a launch -- has no history to judge against and is left to the
+    composition layer, as before.
+    """
+    t = shift.index
+    before = np.ones(t, dtype=bool)
+    for lo, hi in exclude:
+        before &= ~((s.index[:t] >= lo - smear) & (s.index[:t] <= hi + smear))
+    if not before.any():
+        return True
+    y = _smoothed(s)
+    held = float(np.median(y[t:]) - np.median(y[:t][before]))
+    return (np.sign(held) == np.sign(shift.delta)
+            and abs(held) >= abs(shift.delta) * params.PERSIST_FRACTION)
+
+
 def find_level_shifts(s: pd.Series) -> list[LevelShift]:
     level = active_level(s)
     if not np.isfinite(level) or level <= 0 or len(s) < 2 * params.W + 1:
         return []
 
-    y = scale_free(s).rolling(params.ROLLING, center=True,
-                              min_periods=1).median().values
+    y = _smoothed(s)
     raw = s.values
     n = len(y)
 
@@ -269,6 +309,8 @@ def find_step_episodes(
                 z=up.z, open_ended=False, sharpness=up.sharpness))
         else:
             used.add(i)
+            if not _holds_against_history(s, up, exclude or [], smear):
+                continue
             episodes.append(StepEpisode(
                 start=up.at, end=s.index[-1], ratio=up.ratio, z=up.z,
                 open_ended=True, sharpness=up.sharpness))

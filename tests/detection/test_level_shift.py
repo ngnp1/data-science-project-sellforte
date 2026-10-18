@@ -479,3 +479,50 @@ def test_the_benchmarks_own_blocked_ramp_emits_no_step():
         "the benchmark's own gradual ramp must not report a level shift")
     assert find_step_episodes(series) == [], (
         "the benchmark's own gradual ramp must not report a step episode")
+
+
+def test_a_restart_after_a_trickle_pause_is_not_a_permanent_step():
+    """A pause at a trickle -- 6% of normal, below the 15% off threshold but
+    not zero -- followed by spend resuming at its old level. The rise out of
+    the pause has a finite ratio (about 17x the trickle), so nothing used to
+    mark it as a restart: it went unpaired and was reported as a budget step
+    running to the end of the data (dev_012, dev_032). Against the channel's
+    own earlier active level nothing changed, so no open-ended step may start
+    at the restart."""
+    rng = np.random.default_rng(11)
+    values = noisy(1000.0, 200, rng) + noisy(60.0, 60, rng) + noisy(1000.0, 200, rng)
+    series = s(values)
+    off = [(r.start, r.end) for r in find_off_runs(series) if r.notable]
+    assert off, "fixture must produce a notable off-run at the trickle"
+    restart = off[0][1]
+    episodes = find_step_episodes(series, exclude=off)
+    assert not any(e.open_ended and abs((e.start - restart).days) <= params.W
+                   for e in episodes), [(e.start, e.end, e.ratio) for e in episodes]
+
+
+def test_the_end_of_a_temporary_bump_is_not_a_permanent_step():
+    """A bump phased in too gradually for its opening to read as a step, then
+    cut back sharply. Only the cut is detected; unpaired, it used to run to the
+    end of the data as a permanent step DOWN (dev_029, and the same shape at
+    smaller size in dev_003 and dev_040), although spend simply returned to
+    where it had been for most of the history."""
+    rng = np.random.default_rng(12)
+    ramp = list(np.linspace(100.0, 160.0, 14))
+    values = noisy(100.0, 300, rng) + ramp + noisy(160.0, 40, rng) + noisy(100.0, 200, rng)
+    series = s(values)
+    cut = series.index[354]
+    shifts = find_level_shifts(series)
+    assert any(sh.delta < 0 and abs((sh.at - cut).days) <= 3 for sh in shifts), (
+        "fixture must detect the sharp cut back to normal")
+    episodes = find_step_episodes(series)
+    assert not any(e.open_ended and abs((e.start - cut).days) <= 3 for e in episodes), (
+        [(e.start, e.end, e.ratio) for e in episodes])
+
+
+def test_a_genuine_permanent_step_after_a_long_history_survives():
+    """The control for the two tests above: a level that really does change
+    for good is still reported, open-ended, with its ratio."""
+    rng = np.random.default_rng(13)
+    series = s(noisy(100.0, 300, rng) + noisy(250.0, 200, rng))
+    episodes = find_step_episodes(series)
+    assert any(e.open_ended and 2.0 < e.ratio < 3.0 for e in episodes)
