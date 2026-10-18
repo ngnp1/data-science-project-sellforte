@@ -77,6 +77,20 @@ SCORE_NAMES: dict[str, tuple[str, str]] = {
 }
 
 
+def short_label(e: DetectedEvent) -> str:
+    """What and how long, short enough to sit beside a bar on the period map."""
+    ch = e.channel
+    what = {
+        "dark_period": "All channels off",
+        "single_channel": f"Only {ch}",
+        "natural_holdout": f"{ch} paused",
+        "step_change": f"{ch} ×{e.magnitude_ratio:.1f}" if e.magnitude_ratio else f"{ch} step",
+        "channel_pulse": f"{ch} ×{len(e.components)} pauses",
+        "staggered_launch": f"{ch} late",
+    }.get(e.event_type, e.event_type)
+    return f"{what} · {e.n_days}d"
+
+
 def score_rows(parts: dict[str, float]) -> list[tuple[str, str, float]]:
     """(plain name, meaning, value) per sub-score or driver, in input order."""
     return [(*SCORE_NAMES.get(key, (key, "")), value) for key, value in parts.items()]

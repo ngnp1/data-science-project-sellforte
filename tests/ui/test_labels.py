@@ -1,6 +1,6 @@
 from detection.model import EVENT_TYPES
 from ui.labels import (SCORE_NAMES, TYPES, event_id, evidence_band,
-                       priority_band, ranked, score_rows, title)
+                       priority_band, ranked, score_rows, short_label, title)
 
 
 def test_every_event_type_has_copy_and_colours():
@@ -65,3 +65,14 @@ def test_score_rows_keep_order_and_plain_names():
     rows = score_rows({"contrast": 1.0, "mystery": 0.2})
     assert rows == [(SCORE_NAMES["contrast"][0], SCORE_NAMES["contrast"][1], 1.0),
                     ("mystery", "", 0.2)]
+
+
+def test_short_labels_say_what_and_how_long(sample_events):
+    assert {short_label(e) for e in sample_events} == {
+        "All channels off · 55d",
+        "Only Google Search · 30d",
+        "Facebook paused · 42d",
+        "Google Search ×3.1 · 55d",
+        "Radio ×3 pauses · 70d",
+        "Instagram late · 90d",
+    }

@@ -24,9 +24,9 @@ python -m streamlit run app.py --server.address 127.0.0.1
 
 The viewer opens with the included sample, on one page read from top to bottom:
 
-1. **Summary and period map.** How many findings there are, and a timeline with one row per market showing where each finding sits. Click a bar to inspect it.
+1. **Summary and period map.** How many findings there are, and a timeline with one row per market showing where each finding sits, labelled with what happened and for how long. Click a bar to inspect it.
 2. **Ranked findings.** The three most informative findings appear as cards, and the rest follow in a table. Click a card's *Inspect* button or a table row to inspect a finding. *Download findings* saves the table as CSV.
-3. **Inspect panel.** What the period lets you measure, then four tabs. *Readout* shows a rough sales readout and daily spend by channel above sales compared with other markets; pulses also get a chart of sales around each pause. *Why flagged* shows the scores in plain words. *Caveats* lists what to keep in mind, and *Explanation* shows the detector's own text. A data-quality warning always shows above the tabs.
+3. **Inspect panel.** What the period lets you measure, then four tabs. *Readout* shows a rough sales readout, then sales compared with other markets with the reference and finding averages marked, above one weekly spend strip per channel with the finding's own channels highlighted; pulses also get a chart of sales around each pause. *Why flagged* shows the scores in plain words. *Caveats* lists what to keep in mind, and *Explanation* shows the detector's own text. A data-quality warning always shows above the tabs.
 
 Use the sidebar to filter by market or pattern type, hide findings with data warnings, or upload your own CSV files.
 
