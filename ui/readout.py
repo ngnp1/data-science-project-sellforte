@@ -245,7 +245,7 @@ def readout(event: DetectedEvent, panel: Panel,
     if swing is None:
         notes.append("Not enough history to judge normal swings.")
     elif not readable:
-        notes.append("The change is within normal swings, so it isn't clear.")
+        notes.append("The change is small next to normal swings, so no return is shown.")
     return Readout(**base, comparison_markets=tuple(used),
                    sales_reference=sales_reference, sales_during=sales_during,
                    effect=effect, swing=swing, readable=readable,

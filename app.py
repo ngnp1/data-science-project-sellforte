@@ -22,8 +22,8 @@ from ui.readout import readout
 SAMPLE = Path(__file__).parent / "synthetic_data_generator/data"
 ROUGH = "Estimates only. They don't prove what caused the change."
 DEFINITIONS = ("'Vs other markets' is the sales change other markets didn't see. It counts as "
-               "clear when it is at least twice the usual swing. 'Return' is extra sales per extra "
-               "unit of spend, shown only for a clear change where spend moved at least 10%.")
+               "small when it is within twice the usual swing. 'Return' is extra sales per extra "
+               "unit of spend, shown only when the change is not small and spend moved at least 10%.")
 CARRYOVER_NOTE = "Ads keep working for a while after they stop, so a pause's effect is understated."
 
 
@@ -116,17 +116,16 @@ def comparison_label(r) -> str:
     return "Vs other markets" if r.comparison_markets else "Sales change"
 
 
+SALES_CHANGE_HELP = (
+    "How much this market's sales changed during the period, beyond what other markets saw. "
+    "Small changes, within the market's usual week-to-week ups and downs, may be chance. "
+    "Select the row for the full numbers.")
+
+
 def sales_column(r) -> str:
     if r is None or r.effect is None:
         return "No sales data"
-    text = f"{r.effect:+.1%}"
-    if r.swing is None:
-        text += " · not enough history"
-    elif not r.readable:
-        text += " · unclear"
-    if not r.comparison_markets:
-        text += " · no other markets"
-    return text
+    return f"{r.effect:+.1%}"
 
 
 def baseline_help(r) -> str:
@@ -196,6 +195,7 @@ def table(visible, rank, reads) -> None:
     st.dataframe(shown, hide_index=True, width="stretch", key=key,
                  height=35 * (min(len(shown), 10) + 1) + 3,
                  column_config={"Start": st.column_config.DateColumn(format="D MMM YYYY"),
+                                "Sales change": st.column_config.TextColumn(help=SALES_CHANGE_HELP),
                                 **{c: small for c in ("Rank", "Market", "Days")}},
                  on_select=partial(pick_from_table, key), selection_mode="single-row")
     export = frame.assign(
@@ -227,7 +227,7 @@ def kpi_tiles(e, r, panel) -> list[dict]:
         if r.swing is None:
             judged = "not enough history to judge"
         else:
-            judged = f"{'clear' if r.readable else 'unclear'} (usual swing ±{r.swing:.1%})"
+            judged = f"usual swing ±{r.swing:.1%}"
         tiles.append(dict(label=comparison_label(r), value=f"{r.effect:+.1%}",
                           description=judged))
         tiles.append(dict(
@@ -235,7 +235,7 @@ def kpi_tiles(e, r, panel) -> list[dict]:
             value=f"{r.rough_return:,.2f}" if r.rough_return is not None else "—",
             description="extra sales per 1 spent" if r.rough_return is not None
             else "not shown, see the note below" if r.readable
-            else "only shown for a clear change"))
+            else "not shown for a small change"))
     if e.event_type == "dark_period" and r.baseline is not None:
         tiles.append(dict(label="Sales with ads off", value=compact(r.baseline),
                           description=baseline_help(r)))

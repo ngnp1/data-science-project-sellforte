@@ -111,7 +111,7 @@ def test_copy_never_claims_comparison_markets_that_do_not_exist():
     import app as viewer
     e, r = _single_market_readouts()["channel_pulse"]
     assert r.comparison_markets == () and r.effect is not None
-    assert "no other markets" in viewer.sales_column(r)
+    assert viewer.sales_column(r) == f"{r.effect:+.1%}"
     assert viewer.comparison_label(r) == "Sales change"
     assert any("No other market" in line for line in viewer.caveats(e, r))
 
@@ -121,7 +121,7 @@ def test_copy_when_history_is_too_short_to_judge_swings():
     import app as viewer
     e, r = _single_market_readouts()["channel_pulse"]
     unknown = replace(r, swing=None, readable=False)
-    assert "not enough history" in viewer.sales_column(unknown)
+    assert viewer.sales_column(unknown) == f"{unknown.effect:+.1%}"
 
 
 def test_baseline_help_only_claims_a_share_when_it_is_readable_and_negative():
@@ -282,7 +282,7 @@ def test_rough_return_description_says_when_it_was_withheld():
     tiles = {t["label"]: t for t in viewer.kpi_tiles(e, replace(r, readable=True, rough_return=None), panel)}
     assert "not shown" in tiles["Return"]["description"]
     tiles = {t["label"]: t for t in viewer.kpi_tiles(e, replace(r, readable=False, rough_return=None), panel)}
-    assert "clear change" in tiles["Return"]["description"]
+    assert "small change" in tiles["Return"]["description"]
 
 
 def test_kpi_descriptions_keep_channel_names_as_written():
@@ -431,3 +431,14 @@ def test_caveats_are_short_lines_not_a_tab():
     app.session_state["eid"] = SAMPLE_IDS[6]          # US launch touches the data start
     app.run()
     assert any("first day of the data" in c.value for c in app.caption)
+
+
+
+def test_sales_change_cells_show_one_thing():
+    from dataclasses import replace
+    import app as viewer
+    _, _, by_type = _analyzed()
+    _, r = by_type["dark_period"]                      # readable, with other markets
+    assert viewer.sales_column(r) == f"{r.effect:+.1%}"
+    assert viewer.sales_column(replace(r, readable=False)) == f"{r.effect:+.1%}"
+    assert "chance" in viewer.SALES_CHANGE_HELP and "unclear" not in viewer.SALES_CHANGE_HELP.lower()
