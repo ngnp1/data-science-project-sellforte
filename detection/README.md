@@ -12,7 +12,14 @@ for event in run_detection(media, sales, sid="sample"):
     print(event.event_type, event.country_code, event.channel, event.start, event.end)
 ```
 
-Input columns are listed in the [main README](../README.md#use-your-own-data).
+## Input data
+
+| File | Required columns |
+|---|---|
+| Media | `date`, `country_code`, `advertising_channel`, `media_investment` (optional: `impressions`, `clicks`) |
+| Sales (optional) | `date`, `country_code`, `turnover` |
+
+Dates look like `2024-06-24`, and spend must be non-negative. Rows for the same day, market and channel are summed.
 
 ## Steps
 
