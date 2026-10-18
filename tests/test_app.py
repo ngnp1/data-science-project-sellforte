@@ -111,7 +111,6 @@ def test_copy_never_claims_comparison_markets_that_do_not_exist():
     import app as viewer
     e, r = _single_market_readouts()["channel_pulse"]
     assert r.comparison_markets == () and r.effect is not None
-    assert "comparison" not in viewer.headline(e, r).lower()
     assert "no comparison" in viewer.sales_column(r)
     assert viewer.comparison_label(r) == "Sales change"
     assert any("No comparison markets" in line for line in viewer.caveats(e, r))
@@ -122,8 +121,6 @@ def test_copy_when_history_is_too_short_to_judge_swings():
     import app as viewer
     e, r = _single_market_readouts()["channel_pulse"]
     unknown = replace(r, swing=None, readable=False)
-    assert "too little history" in viewer.headline(e, unknown).lower()
-    assert "normal swings" not in viewer.headline(e, unknown)
     assert "too little history" in viewer.sales_column(unknown)
 
 
@@ -177,29 +174,6 @@ def _analyzed(markets=None, with_sales=True):
     return events, panel, {e.event_type: (e, readout(e, panel, events)) for e in events}
 
 
-def test_card_badges_flag_data_warnings():
-    from dataclasses import replace
-    import app as viewer
-    _, _, by_type = _analyzed()
-    e, _ = by_type["dark_period"]
-    assert viewer.card_badges(e)[:3] == [("All advertising off", "outline"),
-                                         ("Priority High", "default"),
-                                         ("Evidence Strong", "secondary")]
-    assert ("Data warning", "destructive") not in viewer.card_badges(e)
-    assert ("Data warning", "destructive") in viewer.card_badges(replace(e, validity="suspect_data_gap"))
-
-
-def test_summary_cards_on_the_sample():
-    import app as viewer
-    events, panel, _ = _analyzed()
-    assert viewer.summary_cards(events, panel.countries) == [
-        ("Findings", "6", "in 5 markets"),
-        ("Markets with findings", "5 of 5", "with a finding"),
-        ("High priority", "5", "priority score ≥ 0.75"),
-        ("With data warnings", "0", "check before using"),
-    ]
-
-
 def test_kpi_tiles_labels_by_finding_type():
     import app as viewer
     events, panel, by_type = _analyzed()
@@ -251,54 +225,9 @@ def run_patched(patch: str) -> AppTest:
     return AppTest.from_string(script, default_timeout=60).run()
 
 
-def test_tab_default_never_moves_so_clicks_are_not_reset():
-    # shadcn treats a changed default as a server reset and drops the click
-    # the user just made, so the default must stay fixed across reruns.
-    app = run_app()
-    app.session_state["inspect_tab"] = "Caveats"
-    inspect_finding(app, 2)
-    tabs = shadcn(app, "tabs")[0]
-    assert tabs["state"]["serverRevision"] == 0
-    assert tabs["state"]["value"] == tabs["props"]["options"][0]["value"]
-
-
-def test_inspect_body_renders_each_tab_for_every_finding():
-    script = f"""
-import sys
-sys.path.insert(0, {ROOT!r})
-import streamlit as st
-import importlib, app
-app = importlib.reload(app)  # earlier tests patch the cached module
-from ui.labels import event_id
-events, panel, reads = app.analyze(*app.load_sample())
-e = next(x for x in events if event_id(x) == st.session_state["eid"])
-app.inspect_body(st.session_state["tab"], e, reads[event_id(e)], panel, False)
-"""
-    expected = {"Readout": "metric_card", "Why flagged": "elements",
-                "Caveats": "alert", "Explanation": "card"}
-    for eid in SAMPLE_IDS.values():
-        for tab, kind in expected.items():
-            app = AppTest.from_string(script, default_timeout=60)
-            app.session_state["eid"], app.session_state["tab"] = eid, tab
-            app.run()
-            assert not app.exception, (eid, tab)
-            assert {c["kind"] for c in shadcn(app)} == {kind}, (eid, tab)
-            assert bool(app.get("plotly_chart")) == (tab == "Readout"), (eid, tab)
-
-
-def test_cards_mark_the_selected_finding():
-    app = inspect_finding(run_app(), 2)
-    buttons = {n["id"].split("/")[-1]: n["props"] for n in element_nodes(app) if n["type"] == "button"}
-    assert buttons["inspect-2"]["text"] == "Inspecting" and buttons["inspect-2"]["variant"] == "default"
-    assert buttons["inspect-1"]["text"] == "Inspect" and buttons["inspect-1"]["variant"] == "outline"
-
-
-def test_cards_and_panel_surface_data_warnings():
+def test_panel_surfaces_data_warnings():
     app = run_patched(DE_ONLY)
     assert not app.exception
-    badges = [b for n in element_nodes(app) if n["type"] == "badge" for b in n["props"]["badges"]]
-    assert {"text": "Data warning", "variant": "destructive"} in badges
-    # The data-quality alert sits above the tabs, so it shows on the default tab.
     alerts = [c["props"] for c in shadcn(app, "alert")]
     assert any(a["title"] == "Data quality" and a["variant"] == "destructive" for a in alerts)
 
@@ -317,40 +246,6 @@ app.why_flagged(next(e for e in events if e.event_type == "dark_period"))
     flagged = AppTest.from_string(script, default_timeout=60).run()
     rows = [n for n in element_nodes(flagged) if n["type"] == "progress"]
     assert len(rows) == 12 and all(0 <= r["props"]["value"] <= 100 for r in rows)
-
-
-def test_inspect_handler_survives_shadcn_event_binding():
-    script = f"""
-import sys
-sys.path.insert(0, {ROOT!r})
-import streamlit as st
-import importlib, app
-app = importlib.reload(app)  # earlier tests patch the cached module
-from streamlit_shadcn_ui.v2.elements import _invoke_callback
-st.session_state["table_nonce"] = 0
-_invoke_callback(app.inspect_handler("x"), object())
-st.write(st.session_state["table_nonce"], st.session_state["selected"])
-"""
-    app = AppTest.from_string(script, default_timeout=30).run()
-    assert not app.exception
-    assert [m.value.strip("`") for m in app.markdown] == ["1", "x"] or \
-        "1" in app.markdown[0].value and "x" in app.markdown[0].value
-
-
-def test_caption_counts_caveats_and_none_copy_matches_spec():
-    app = inspect_finding(run_app(), 6)          # US launch touches the data start
-    assert "1 caveat" in app.caption[-1].value or any("1 caveat" in c.value for c in app.caption)
-    script = f"""
-import sys
-sys.path.insert(0, {ROOT!r})
-import importlib, app
-app = importlib.reload(app)  # earlier tests patch the cached module
-events, panel, reads = app.analyze(*app.load_sample())
-e = next(x for x in events if x.event_type == "dark_period")
-app.caveat_alerts(e, reads[app.event_id(e)])
-"""
-    none = AppTest.from_string(script, default_timeout=60).run()
-    assert [c["props"]["title"] for c in shadcn(none, "alert")] == ["No caveats found for this finding."]
 
 
 def test_rough_return_description_says_when_it_was_withheld():
@@ -446,7 +341,7 @@ def test_switching_detector_drops_a_selection_it_does_not_report(only_ours):
     assert inspected(app) == "#1 · AT · Facebook paused"
 
 
-def test_unscored_detector_renders_every_tab(only_ours):
+def test_unscored_detector_renders_the_panel(only_ours):
     script = f"""
 import sys
 sys.path.insert(0, {ROOT!r})
@@ -460,17 +355,53 @@ media, sales = app.load_sample()
 events = registry.get("stub").detect(media, sales)
 panel = build_panel(media, sales)
 e = events[st.session_state["i"]]
-app.inspect_body(st.session_state["tab"], e, readout(e, panel, events), panel, False)
+app.inspect(e, readout(e, panel, events), 1, panel, False)
 """
     for i in (0, 1):
-        for tab in ("Readout", "Why flagged", "Caveats", "Explanation"):
-            app = AppTest.from_string(script, default_timeout=60)
-            app.session_state["i"], app.session_state["tab"] = i, tab
-            app.run()
-            assert not app.exception, (i, tab)
-            if tab == "Why flagged":
-                assert [c["props"]["title"] for c in shadcn(app, "alert")] == [
-                    "No scores from this detector"]
-            if tab == "Explanation":
-                assert shadcn(app, "card")[0]["props"]["content"] == \
-                    "This detector gives no explanation."
+        app = AppTest.from_string(script, default_timeout=60)
+        app.session_state["i"] = i
+        app.run()
+        assert not app.exception, i
+        assert "No scores from this detector" in [c["props"]["title"] for c in shadcn(app, "alert")]
+        assert any("This detector gives no explanation." in m.value for m in app.markdown), i
+
+
+
+INSPECT = f"""
+import sys
+sys.path.insert(0, {ROOT!r})
+import importlib, app
+app = importlib.reload(app)  # earlier tests patch the cached module
+import streamlit as st
+from ui.labels import event_id
+events, panel, reads = app.analyze(*app.load_sample())
+e = next(x for x in events if event_id(x) == st.session_state["eid"])
+app.inspect(e, reads[event_id(e)], 1, panel, False)
+"""
+
+
+def test_the_page_has_no_summary_cards_or_top_cards():
+    app = run_app()
+    assert not app.exception
+    assert not [c for c in shadcn(app) if c["kind"] in ("metric_card", "elements", "tabs")
+                and c["props"].get("label") in ("Findings", "Markets with findings")]
+    assert not shadcn(app, "tabs")
+    assert not [n for n in element_nodes(app) if n["type"] == "button"]
+
+
+def test_inspect_shows_readout_chart_and_collapsed_details_for_every_finding():
+    for eid in SAMPLE_IDS.values():
+        app = AppTest.from_string(INSPECT, default_timeout=60)
+        app.session_state["eid"] = eid
+        app.run()
+        assert not app.exception, eid
+        assert shadcn(app, "metric_card"), eid
+        assert app.get("plotly_chart"), eid
+        assert [x.label for x in app.expander] == ["Details"], eid
+
+
+def test_caveats_are_short_lines_not_a_tab():
+    app = AppTest.from_string(INSPECT, default_timeout=60)
+    app.session_state["eid"] = SAMPLE_IDS[6]          # US launch touches the data start
+    app.run()
+    assert any("first day of the data" in c.value for c in app.caption)

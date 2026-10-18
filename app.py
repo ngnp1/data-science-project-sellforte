@@ -21,7 +21,6 @@ from ui.readout import readout
 
 SAMPLE = Path(__file__).parent / "synthetic_data_generator/data"
 ROUGH = "Rough reading, not a causal estimate."
-TABS = ("Readout", "Why flagged", "Caveats", "Explanation")
 DEFINITIONS = ("Vs comparison is the sales change the comparison markets did not share; it "
                "counts as readable when it is at least twice the typical swing at other "
                "times of year. Rough return is extra sales per extra 1 spent, shown only for "
@@ -113,19 +112,6 @@ def subject_label(e, r) -> str:
     return ", ".join(r.subject_channels) if r else str(e.channel)
 
 
-def headline(e, r) -> str:
-    """The one number a card leads with."""
-    if r is None or r.sales_reference is None:
-        return "No sales reading available"
-    if r.baseline is not None:
-        return f"No-ads baseline ≈ **{r.baseline:,.0f}**/day"
-    if r.swing is None:
-        return "Too little history to judge the sales change"
-    if not r.readable:
-        return "Sales change is within normal swings"
-    if not r.comparison_markets:
-        return f"Sales change **{r.effect:+.1%}**"
-    return f"Sales vs comparison markets **{r.effect:+.1%}**"
 
 
 def comparison_label(r) -> str:
@@ -176,63 +162,14 @@ def caveats(e, r) -> list[str]:
     return out
 
 
-def summary_cards(visible, markets) -> list[tuple[str, str, str]]:
-    """(label, value, description) for the summary strip."""
-    with_findings = len({e.country_code for e in visible})
-    return [
-        ("Findings", str(len(visible)), f"in {with_findings} markets"),
-        ("Markets with findings", f"{with_findings} of {len(markets)}", "with a finding"),
-        ("High priority", str(sum(priority_band(e.informativeness) == "High" for e in visible)),
-         "priority score ≥ 0.75"),
-        ("With data warnings", str(sum(e.validity != "ok" for e in visible)),
-         "check before using"),
-    ]
 
 
-def card_badges(e) -> list[tuple[str, str]]:
-    """(text, shadcn badge variant) for a finding's card."""
-    badges = [(TYPES[e.event_type].name, "outline"),
-              (f"Priority {priority_band(e.informativeness)}", "default"),
-              (f"Evidence {evidence_band(e.detection_confidence)}", "secondary")]
-    if e.validity != "ok":
-        badges.append(("Data warning", "destructive"))
-    return badges
 
 
-def summary(visible, markets) -> None:
-    for col, (label, value, description) in zip(st.columns(4), summary_cards(visible, markets)):
-        with col:
-            ui.metric_card(label, value, description=description, key=f"summary-{label}")
 
 
-def inspect_handler(eid: str):
-    """A zero-argument click handler: shadcn passes its click event to any
-    callback that can take one, which would land in select()'s from_table."""
-    def handler() -> None:
-        select(eid)
-    return handler
 
 
-def cards(visible, rank, reads, selected) -> None:
-    with ui.elements(key="top-findings") as el:
-        with el.grid(columns=3, gap="md"):
-            for e in visible[:3]:
-                eid, n = event_id(e), rank[event_id(e)]
-                chosen = eid == selected
-                with el.card(key=f"card-{n}"):
-                    with el.card_header():
-                        el.heading(f"#{n} · {title(e)}", level=4)
-                        el.text(f"{fmt_day(e.start)} – {fmt_day(e.end)} · {e.n_days} days",
-                                variant="muted")
-                    with el.card_content():
-                        with el.stack(direction="horizontal", gap="sm", wrap=True):
-                            for text, variant in card_badges(e):
-                                el.badge(text, variant=variant)
-                        el.text(headline(e, reads[eid]).replace("**", ""))
-                    with el.card_footer():
-                        el.button("Inspecting" if chosen else "Inspect", key=f"inspect-{n}",
-                                  variant="default" if chosen else "outline", stretch=True,
-                                  on_click=inspect_handler(eid))
 
 
 def table(visible, rank, reads) -> None:
@@ -327,12 +264,7 @@ def kpis(e, r, panel) -> None:
             ui.metric_card(tile["label"], tile["value"], description=tile["description"],
                            key=f"kpi-{tile['label']}")
 
-    side = {"before": "the same number of days just before it",
-            "after": "the same number of days just after it (the data starts too late for a before window)",
-            "on-days": "the pulse's own on-days between pauses"}[r.reference_side]
-    peers = ", ".join(r.comparison_markets) or "none"
-    st.caption(f"{ROUGH} Reference window: {side}. Comparison markets: {peers}. "
-               f"{r.note} {DEFINITIONS} {CARRYOVER_NOTE}")
+    st.caption(f"{ROUGH} {r.note}".strip())
 
 
 def why_flagged(e) -> None:
@@ -356,52 +288,46 @@ def why_flagged(e) -> None:
                             el.text(meaning, variant="muted")
 
 
-def caveat_alerts(e, r) -> None:
-    lines = caveats(e, r)
-    if not lines:
-        ui.alert("No caveats found for this finding.", key="caveat-none")
-    for i, line in enumerate(lines):
-        flagged = line.startswith("Data quality")
-        ui.alert("Data quality" if flagged else "Keep in mind", line,
-                 variant="destructive" if flagged else "default", key=f"caveat-{i}")
 
 
-def inspect_body(tab, e, r, panel, dark) -> None:
-    if tab == "Readout":
-        kpis(e, r, panel)
-        st.plotly_chart(event_chart(e, panel, r, dark), key="detail", width="stretch")
-        after = carryover_chart(e, panel, r, dark)
-        if after is not None:
-            st.markdown("**Sales around each pause, averaged over the pauses**")
-            st.plotly_chart(after, key="carryover", width="stretch")
-    elif tab == "Why flagged":
-        why_flagged(e)
-    elif tab == "Caveats":
-        caveat_alerts(e, r)
-    else:
-        ui.card(title="Detector's explanation",
-                content=e.explanation or "This detector gives no explanation.",
-                key="explanation")
+
+
+def method_note(r) -> str:
+    """How the readout was computed, for the Details section."""
+    side = {"before": "the same number of days just before it",
+            "after": "the same number of days just after it (the data starts too late for a before window)",
+            "on-days": "the pulse's own on-days between pauses"}[r.reference_side]
+    peers = ", ".join(r.comparison_markets) or "none"
+    return (f"Reference window: {side}. Comparison markets: {peers}. "
+            f"{DEFINITIONS} {CARRYOVER_NOTE}")
 
 
 def inspect(e, r, rank, panel, dark) -> None:
     info = TYPES[e.event_type]
     found = caveats(e, r)
     st.subheader(f"#{rank} · {title(e)}")
-    count = (f" · {len(found)} caveat{'s' if len(found) > 1 else ''} — see the Caveats tab"
-             if found else "")
-    st.caption(f"{info.name} · {fmt_day(e.start)} – {fmt_day(e.end)} · {e.n_days} days · "
+    st.caption(f"{fmt_day(e.start)} – {fmt_day(e.end)} · {e.n_days} days · "
                f"Priority {priority_band(e.informativeness)} · "
-               f"Evidence {evidence_band(e.detection_confidence)}{count}")
+               f"Evidence {evidence_band(e.detection_confidence)} · {info.measures}")
     if e.validity != "ok":
-        # A data-quality flag can undo every number below, so it never hides in a tab.
+        # A data-quality flag can undo every number below, so it is never tucked away.
         ui.alert("Data quality", next(line for line in found if line.startswith("Data quality")),
                  variant="destructive", key="data-quality")
-    ui.alert("What this lets you measure", info.measures, key="measures")
-    # No `value=`: shadcn treats a changed default as a server reset and drops
-    # the user's click, so the tab's own state is the only source of truth.
-    tab = ui.tabs(TABS, key="inspect-tabs") or TABS[0]
-    inspect_body(tab, e, r, panel, dark)
+    kpis(e, r, panel)
+    st.plotly_chart(event_chart(e, panel, r, dark), key="detail", width="stretch")
+    after = carryover_chart(e, panel, r, dark)
+    if after is not None:
+        st.markdown("**Sales around each pause, averaged over the pauses**")
+        st.plotly_chart(after, key="carryover", width="stretch")
+    for line in found:
+        if not line.startswith("Data quality"):
+            st.caption(f"⚠ {line}")
+    with st.expander("Details"):
+        why_flagged(e)
+        if r is not None:
+            st.caption(method_note(r))
+        st.markdown(f"**Detector's explanation.** "
+                    f"{e.explanation or 'This detector gives no explanation.'}")
 
 
 def main():
@@ -442,7 +368,6 @@ def main():
     visible = [e for e in order if e.country_code in markets and e.event_type in chosen
                and not (hide and e.validity != "ok")]
 
-    summary(visible, markets)
     if not visible:
         st.info("No findings match these filters.")
         return
@@ -459,9 +384,7 @@ def main():
                     width="stretch", config={"displayModeBar": False})
 
     st.markdown("#### Ranked findings")
-    st.caption("Ranked by how informative each period is likely to be. Priority and evidence "
-               "are bands of rule-based scores, not probabilities.")
-    cards(visible, rank, reads, selected)
+    st.caption("Most informative first. Click a row to inspect it.")
     table(visible, rank, reads)
 
     st.divider()
