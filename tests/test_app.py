@@ -376,3 +376,92 @@ def test_table_shows_a_sortable_start_date():
     assert list(frame.columns) == ["Rank", "Market", "Finding", "Channel", "Start", "Days",
                                    "Priority", "Evidence", "Sales change", "Data quality"]
     assert isinstance(frame["Start"].iloc[0], datetime.date)
+
+
+# --- detectors: the app runs whatever is registered. ---
+
+STUB = '''
+import pandas as pd
+from detection.model import DetectedEvent
+from detectors import registry
+from detectors.base import Detector
+
+class StubDetector(Detector):
+    key, name = "stub", "Stub detector"
+    event_types = frozenset({"dark_period", "natural_holdout"})
+    def detect(self, media, sales):
+        return [
+            DetectedEvent(sid="", country_code="DE", channel=None, event_type="dark_period",
+                          start=pd.Timestamp("2024-06-24"), end=pd.Timestamp("2024-08-17")),
+            DetectedEvent(sid="", country_code="AT", channel="Facebook",
+                          event_type="natural_holdout",
+                          start=pd.Timestamp("2025-02-04"), end=pd.Timestamp("2025-03-17")),
+        ]
+
+if "stub" not in [d.key for d in registry.available()]:
+    registry.register(StubDetector())
+'''
+
+
+def _drop_stub():
+    from detectors import registry
+    registry._DETECTORS.pop("stub", None)
+
+
+def test_detector_picker_hidden_with_one_detector():
+    app = run_app()
+    assert not app.exception
+    assert "Detector" not in [s.label for s in app.sidebar.selectbox]
+
+
+def test_switching_detector_changes_the_findings():
+    try:
+        app = run_patched(STUB)
+        assert not app.exception
+        picker = next(s for s in app.sidebar.selectbox if s.label == "Detector")
+        assert picker.options == ["Rule-based (ours)", "Stub detector"]
+        assert len(app.dataframe[0].value) == 6
+        picker.set_value("Stub detector").run()
+        assert not app.exception
+        assert len(app.dataframe[0].value) == 2
+        assert set(app.dataframe[0].value["Priority"]) == {"Unscored"}
+        # The DE dark period exists in both detectors' output, so the selection
+        # carries over, exactly as it does through a filter change.
+        assert inspected(app) == "#2 · DE · All advertising off"
+        kinds = app.sidebar.multiselect[1]
+        assert set(kinds.options) == {"All advertising off", "One channel paused"}
+    finally:
+        _drop_stub()
+
+
+def test_unscored_detector_renders_every_tab():
+    script = f"""
+import sys
+sys.path.insert(0, {ROOT!r})
+import importlib, app
+app = importlib.reload(app)  # earlier tests patch the cached module
+{STUB}
+import streamlit as st
+from detection.io.panel import build_panel
+from ui.readout import readout
+media, sales = app.load_sample()
+events = registry.get("stub").detect(media, sales)
+panel = build_panel(media, sales)
+e = events[st.session_state["i"]]
+app.inspect_body(st.session_state["tab"], e, readout(e, panel, events), panel, False)
+"""
+    try:
+        for i in (0, 1):
+            for tab in ("Readout", "Why flagged", "Caveats", "Explanation"):
+                app = AppTest.from_string(script, default_timeout=60)
+                app.session_state["i"], app.session_state["tab"] = i, tab
+                app.run()
+                assert not app.exception, (i, tab)
+                if tab == "Why flagged":
+                    assert [c["props"]["title"] for c in shadcn(app, "alert")] == [
+                        "No scores from this detector"]
+                if tab == "Explanation":
+                    assert shadcn(app, "card")[0]["props"]["content"] == \
+                        "This detector gives no explanation."
+    finally:
+        _drop_stub()

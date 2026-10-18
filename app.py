@@ -13,7 +13,7 @@ import streamlit as st
 import streamlit_shadcn_ui as ui
 
 from detection.io.panel import build_panel
-from detection.pipeline import run_detection
+from detectors import registry
 from ui.charts import carryover_chart, event_chart, period_map
 from ui.labels import (TYPES, event_id, evidence_band, priority_band, ranked, score_rows,
                        title)
@@ -36,8 +36,9 @@ def load_sample():
 
 
 @st.cache_data(show_spinner=False)
-def analyze(media, sales):
-    events = run_detection(media, sales, "viewer")
+def analyze(media, sales, detector_key: str | None = None):
+    detector = registry.get(detector_key) if detector_key else registry.default()
+    events = detector.detect(media, sales)
     panel = build_panel(media, sales, "viewer")
     return events, panel, {event_id(e): readout(e, panel, events) for e in events}
 
@@ -335,6 +336,11 @@ def kpis(e, r, panel) -> None:
 
 
 def why_flagged(e) -> None:
+    if not (e.evidence.get("confidence_sub_scores") or e.evidence.get("informativeness_drivers")):
+        ui.alert("No scores from this detector",
+                 "This detector does not report the scores behind its findings.",
+                 key="no-scores")
+        return
     st.caption("Rule-based scores from 0 to 1, not probabilities.")
     groups = (("Evidence that it happened", "confidence_sub_scores", "evidence"),
               ("How useful it is", "informativeness_drivers", "usefulness"))
@@ -373,7 +379,9 @@ def inspect_body(tab, e, r, panel, dark) -> None:
     elif tab == "Caveats":
         caveat_alerts(e, r)
     else:
-        ui.card(title="Detector's explanation", content=e.explanation, key="explanation")
+        ui.card(title="Detector's explanation",
+                content=e.explanation or "This detector gives no explanation.",
+                key="explanation")
 
 
 def inspect(e, r, rank, panel, dark) -> None:
@@ -403,9 +411,16 @@ def main():
     if loaded is None:
         return
     media, sales, label = loaded
+    detectors = registry.available()
+    detector = registry.default()
+    if len(detectors) > 1:
+        names = [d.name for d in detectors]
+        chosen_name = st.sidebar.selectbox("Detector", names)
+        detector = detectors[names.index(chosen_name)]
+        label = f"{label} · Detector: {detector.name}"
     try:
         with st.spinner("Finding periods…"):
-            events, panel, reads = analyze(media, sales)
+            events, panel, reads = analyze(media, sales, detector.key)
     except (ValueError, KeyError, TypeError) as exc:
         st.error(f"Please check your input data: {exc}")
         return
@@ -419,7 +434,8 @@ def main():
     order = ranked(events)
     rank = {event_id(e): i + 1 for i, e in enumerate(order)}
     markets = st.sidebar.multiselect("Markets", panel.countries, default=panel.countries)
-    kinds = [k for k in TYPES if any(e.event_type == k for e in events)]
+    kinds = [k for k in TYPES
+             if k in detector.event_types and any(e.event_type == k for e in events)]
     chosen = st.sidebar.multiselect("Pattern types", kinds, default=kinds,
                                     format_func=lambda k: TYPES[k].name)
     hide = st.sidebar.checkbox("Hide findings with data warnings")

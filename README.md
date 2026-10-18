@@ -43,6 +43,27 @@ Use dates such as `2024-06-24`. Media spend must be a finite, non-negative numbe
 
 Multiple campaign rows are summed for each day, market, and channel. Missing daily rows are flagged because a missing record does not prove that advertising stopped. Event start and end dates both belong to the reported window.
 
+## Plug in another detector
+
+The app and the evaluation harness run any detector registered in `detectors/`. Our rule-based library is one implementation (`detectors/rule_based.py`). To add another, subclass `Detector` and register it:
+
+```python
+from detectors.base import Detector
+from detectors import registry
+
+class MyDetector(Detector):
+    key = "my_detector"
+    name = "My detector"
+    event_types = frozenset({"dark_period", "natural_holdout"})
+
+    def detect(self, media, sales):
+        ...  # return a list of detection.model.DetectedEvent
+
+registry.register(MyDetector())
+```
+
+A finding must name its market, type, channel (none for a dark period) and inclusive dates, plus the off-windows for a pulse. Scores, data-quality checks and explanations are optional; the app says when a detector leaves them out. Once two or more detectors are registered, a **Detector** picker appears in the sidebar. To score it on the development split, add `detect = for_detector("my_detector")` (from `benchmark.eval.adapter`) to a module and run `python -m benchmark.eval.run_dev --detector mymodule:detect --load-data`.
+
 ## Check the results
 
 With the virtual environment active, run:

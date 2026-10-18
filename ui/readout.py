@@ -27,7 +27,7 @@ import pandas as pd
 
 from detection.io.panel import Panel
 from detection.model import DetectedEvent
-from detection.score import subject_channels
+from detection.model import subject_channels
 
 REFERENCE_MAX_DAYS = 90
 REFERENCE_MIN_DAYS = 7

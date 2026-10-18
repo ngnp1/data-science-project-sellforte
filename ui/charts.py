@@ -19,7 +19,7 @@ from plotly.subplots import make_subplots
 
 from detection.io.panel import Panel
 from detection.model import DetectedEvent
-from detection.score import subject_channels
+from detection.model import subject_channels
 from ui.labels import TYPES, event_id, short_label, title
 from ui.readout import Readout
 
