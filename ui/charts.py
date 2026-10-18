@@ -169,8 +169,8 @@ def event_chart(event: DetectedEvent, panel: Panel, rd: Readout | None,
                           line_width=0, layer="below", row="all", col=1)
             if i == 0:
                 fig.add_annotation(x=a, y=1.0, xref="x", yref="paper", text=label,
-                                   showarrow=False, xanchor="left", yanchor="bottom",
-                                   font=dict(size=11, color=MUTED))
+                                   showarrow=False, xanchor="left", yanchor="top",
+                                   xshift=4, font=dict(size=11, color=MUTED))
 
     pad = pd.Timedelta(days=max(event.n_days, 60))
     lo = max(panel.dates[0], event.start - pad)
@@ -178,7 +178,16 @@ def event_chart(event: DetectedEvent, panel: Panel, rd: Readout | None,
     fig.update_xaxes(range=[lo, hi])
     fig.update_yaxes(title_text="Spend", row=1, col=1)
     fig.update_layout(hovermode="x unified")
-    return _base_layout(fig, 500 if has_sales else 300)
+    _base_layout(fig, 520 if has_sales else 320)
+    # Many channels make a long legend: below the plot it cannot cover the
+    # subplot titles or the window labels.
+    fig.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.08,
+                                  xanchor="left", x=0))
+    fig.for_each_annotation(lambda a: a.update(x=0, xanchor="left")
+                            if a.text in ("Daily spend by channel",
+                                          "Sales, 7-day average, reference window = 100")
+                            else None)
+    return fig
 
 
 def carryover_chart(event: DetectedEvent, panel: Panel, rd: Readout | None,
@@ -191,7 +200,9 @@ def carryover_chart(event: DetectedEvent, panel: Panel, rd: Readout | None,
     offsets = np.arange(CARRYOVER_DAYS[0], CARRYOVER_DAYS[1] + 1)
 
     def curve(market: str) -> np.ndarray:
-        values = panel.sales[market].to_numpy(dtype=float)
+        # A light 3-day average: daily noise otherwise hides the shape of the decay.
+        values = (panel.sales[market].rolling(3, center=True, min_periods=1).mean()
+                  .to_numpy(dtype=float))
         rows = []
         for start, _ in event.components:
             i = panel.dates.get_loc(start)
@@ -216,12 +227,16 @@ def carryover_chart(event: DetectedEvent, panel: Panel, rd: Readout | None,
     fig.add_vrect(x0=0, x1=off_days, fillcolor=SHADE[dark], opacity=0.18,
                   line_width=0, layer="below")
     fig.add_annotation(x=0, y=1.0, yref="paper", text="Spend off", showarrow=False,
-                       xanchor="left", yanchor="bottom", font=dict(size=11, color=MUTED))
+                       xanchor="left", yanchor="top", xshift=4,
+                       font=dict(size=11, color=MUTED))
     fig.add_hline(y=100, line=dict(width=1, color=MUTED))
     fig.update_xaxes(title_text="Days since spend stopped")
-    fig.update_yaxes(title_text="Index (2 weeks before = 100)")
+    fig.update_yaxes(title_text="3-day avg (2 weeks before = 100)")
     fig.update_layout(hovermode="x unified")
-    return _base_layout(fig, 320)
+    _base_layout(fig, 340)
+    fig.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.25,
+                                  xanchor="left", x=0))
+    return fig
 
 
 def score_bars(parts: dict[str, float], dark: bool = False) -> go.Figure:
