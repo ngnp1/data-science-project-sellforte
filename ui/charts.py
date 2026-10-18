@@ -16,6 +16,7 @@ from plotly.subplots import make_subplots
 
 from detection.io.panel import Panel
 from detection.model import DetectedEvent
+from detection.score import subject_channels
 from ui.labels import SCORE_NAMES, TYPES, event_id, title
 from ui.readout import Readout
 
@@ -118,6 +119,11 @@ def event_chart(event: DetectedEvent, panel: Panel, rd: Readout | None,
                         "Sales, 7-day average, reference window = 100")[:rows])
 
     colors = channel_colors(panel, dark)
+    # The finding's own channel must stay visible to be checked by eye: when
+    # it would fold into "Other", it takes the one slot folding leaves free.
+    subjects = subject_channels(event, panel)
+    if len(subjects) == 1 and colors.get(subjects[0]) == MUTED:
+        colors[subjects[0]] = (SLOTS_DARK if dark else SLOTS_LIGHT)[-1]
     channels = sorted(panel.channels_in(country),
                       key=lambda ch: list(colors).index(ch))
     named = [ch for ch in channels if colors[ch] != MUTED]

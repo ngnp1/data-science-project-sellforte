@@ -86,3 +86,23 @@ def test_event_chart_marks_missing_data_rows(sample_frames, sample_events):
     assert list(pd.to_datetime(gaps[0].x)) == list(pd.date_range("2024-06-01", "2024-06-03"))
     complete = event_chart(dark, build_panel(media, sales), None)
     assert not [t for t in complete.data if t.name == "Missing data rows"]
+
+
+def test_event_chart_never_folds_the_findings_own_channel():
+    from detection.io.panel import build_panel
+    from detection.model import DetectedEvent
+    dates = pd.date_range("2024-01-01", periods=200, freq="D")
+    rows = []
+    for i in range(10):  # ten channels: the smallest would fold into "Other"
+        spend = [100.0 - 9 * i] * 200
+        if i == 9:
+            spend[100:130] = [0.0] * 30
+        rows.append(pd.DataFrame({"date": dates, "country_code": "AT",
+                                  "advertising_channel": f"C{i}", "media_investment": spend}))
+    panel = build_panel(pd.concat(rows))
+    e = DetectedEvent(sid="t", country_code="AT", channel="C9", event_type="natural_holdout",
+                      start=dates[100], end=dates[129])
+    names = [t.name for t in event_chart(e, panel, readout(e, panel, [e])).data]
+    assert "C9" in names and "Other" in names
+    colours = {t.name: t.line.color for t in event_chart(e, panel, None).data}
+    assert colours["C9"] != colours["Other"]

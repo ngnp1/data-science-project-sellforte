@@ -100,8 +100,8 @@ def test_no_reference_window_gives_none():
 def test_pulse_uses_on_days_inside_span(panel):
     pulse = event("AT", "TV", "channel_pulse", 100, 141,
                   components=((100, 113), (128, 141)))
-    during, reference, side = masks(pulse, panel)
-    assert side == "on-days"
+    during, reference, side, trimmed = masks(pulse, panel)
+    assert side == "on-days" and not trimmed
     assert int(during.sum()) == 28 and not (during & reference).any()
     assert reference[DATES[114]:DATES[127]].all() and int(reference.sum()) == 14
 
@@ -171,3 +171,61 @@ def test_dark_period_baseline(sample_events, sample_panel):
     r = readout(dark, sample_panel, sample_events)
     assert r.baseline == pytest.approx(sample_panel.sales["DE"][r.during].mean())
     assert r.spend_during == 0.0 and r.spend_reference > 0
+
+
+def test_rough_return_withheld_when_other_channels_moved_too():
+    # AT TV also drops 20 → 5 during the Facebook pause: Δother 15 > 0.5 × |Δsubject| 10
+    moved = make_panel({"AT": with_window(100, 90, 200, 241), "CH": flat(50), "DE": flat(70)},
+                       {**BASE_SPEND, ("AT", "TV"): with_window(20, 5, 200, 241)})
+    r = readout(HOLDOUT_AT, moved, [HOLDOUT_AT])
+    assert r.readable and r.rough_return is None
+    assert "other channels" in r.note.lower()
+
+
+def test_rough_return_withheld_when_sales_move_against_spend():
+    against = make_panel({"AT": with_window(100, 110, 200, 241), "CH": flat(50), "DE": flat(70)},
+                         BASE_SPEND)
+    r = readout(HOLDOUT_AT, against, [HOLDOUT_AT])
+    assert r.readable and r.effect > 0 and r.rough_return is None
+    assert "opposite" in r.note
+
+
+def test_rough_return_withheld_for_confounded_findings(panel):
+    from dataclasses import replace
+    tagged = replace(HOLDOUT_AT, tags=("confounded",))
+    r = readout(tagged, panel, [tagged])
+    assert r.readable and r.rough_return is None
+    assert "overlaps" in r.note
+
+
+def test_steady_trend_against_peers_is_not_readable():
+    # AT grows 0.1% a day relative to flat peers; no change at the event itself.
+    trend = [100 * 1.001 ** i for i in range(N_DAYS)]
+    trending = make_panel({"AT": trend, "CH": flat(50), "DE": flat(70)}, BASE_SPEND)
+    r = readout(HOLDOUT_AT, trending, [HOLDOUT_AT])
+    assert r.effect > 0.03 and r.swing is not None
+    assert not r.readable
+
+
+def test_reference_skips_another_finding_in_the_same_market():
+    # Facebook paused days 150-191, then tripled days 192-247.
+    fb = flat(10)
+    fb[150:192] = [0.0] * 42
+    fb[192:248] = [30.0] * 56
+    seq = make_panel({"AT": flat(100), "CH": flat(50), "DE": flat(70)},
+                     {**BASE_SPEND, ("AT", "Facebook"): fb})
+    pause = event("AT", "Facebook", "natural_holdout", 150, 191)
+    step = event("AT", "Facebook", "step_change", 192, 247)
+    r = readout(step, seq, [pause, step])
+    assert r.reference_side == "after"          # the clean side wins
+    assert not r.reference[DATES[150]:DATES[191]].any()
+    assert r.spend_during / r.spend_reference == pytest.approx(3.0)
+    assert "skips" not in r.note
+
+    # Another finding right after the step too: the before-window is trimmed.
+    later = event("AT", "TV", "natural_holdout", 248, 300)
+    trimmed = readout(step, seq, [pause, step, later])
+    assert trimmed.reference_side == "before"
+    assert trimmed.reference[DATES[136]:DATES[149]].all() and int(trimmed.reference.sum()) == 14
+    assert trimmed.spend_during / trimmed.spend_reference == pytest.approx(3.0)
+    assert "skips" in trimmed.note

@@ -4,6 +4,8 @@ One page, read top to bottom: what was found (summary and period map), which
 findings matter most (ranked cards and table), and what the selected finding
 lets you measure (rough readout, charts, scores and caveats).
 """
+import zlib
+from functools import partial
 from pathlib import Path
 
 import pandas as pd
@@ -75,8 +77,12 @@ def load_data():
     return media, sales, f"Uploaded: {media_file.name}"
 
 
-def select(eid: str) -> None:
+def select(eid: str, from_table: bool = False) -> None:
     st.session_state["selected"] = eid
+    if not from_table:
+        # A keyed table keeps its row tick across reruns, so a selection made
+        # anywhere else gets the table a new key and clears a stale tick.
+        st.session_state["table_nonce"] = st.session_state.get("table_nonce", 0) + 1
 
 
 def pick_from_map() -> None:
@@ -85,10 +91,10 @@ def pick_from_map() -> None:
         select(points[0]["customdata"][0])
 
 
-def pick_from_table() -> None:
-    rows = st.session_state["table"].selection.rows
+def pick_from_table(key: str) -> None:
+    rows = st.session_state[key].selection.rows
     if rows:
-        select(st.session_state["table_ids"][rows[0]])
+        select(st.session_state["table_ids"][rows[0]], from_table=True)
 
 
 def subject_label(e, r) -> str:
@@ -105,15 +111,38 @@ def headline(e, r) -> str:
         return "No sales reading available"
     if r.baseline is not None:
         return f"Baseline sales with no advertising ≈ **{r.baseline:,.0f}**/day"
+    if r.swing is None:
+        return "Too little history to judge the sales change"
     if not r.readable:
         return "Sales change is within normal swings"
+    if not r.comparison_markets:
+        return f"Sales change **{r.effect:+.1%}**"
     return f"Sales vs comparison markets **{r.effect:+.1%}**"
+
+
+def comparison_label(r) -> str:
+    """Only say "comparison" when comparison markets were actually used."""
+    return "Vs comparison" if r.comparison_markets else "Sales change"
 
 
 def sales_column(r) -> str:
     if r is None or r.effect is None:
         return "No sales reading"
-    return f"{r.effect:+.1%}" if r.readable else f"{r.effect:+.1%} · unclear"
+    text = f"{r.effect:+.1%}"
+    if r.swing is None:
+        text += " · too little history"
+    elif not r.readable:
+        text += " · unclear"
+    if not r.comparison_markets:
+        text += " · no comparison"
+    return text
+
+
+def baseline_help(r) -> str:
+    text = "Average daily sales while no advertising ran."
+    if r.readable and r.effect is not None and r.effect < 0:
+        text += f" About {-r.effect:.0%} of sales went with advertising (rough)."
+    return text
 
 
 def caveats(e, r) -> list[str]:
@@ -130,6 +159,9 @@ def caveats(e, r) -> list[str]:
                    "so their effects are hard to separate.")
     if r is None:
         out.append("Not enough data around this period for a sales reading.")
+    elif r.sales_reference is not None and not r.comparison_markets:
+        out.append("No comparison markets without their own findings in these weeks, "
+                   "so the sales change also includes any seasonality or trend.")
     verification = e.evidence.get("launch_verification")
     if isinstance(verification, dict) and verification.get("status"):
         out.append(f"Launch analysis readiness: {str(verification['status']).replace('_', ' ')}.")
@@ -174,17 +206,21 @@ def table(visible, rank, reads) -> None:
             "Start": e.start.date(), "End": e.end.date(), "Days": e.n_days,
             "Priority": priority_band(e.informativeness),
             "Evidence": evidence_band(e.detection_confidence),
-            "Sales vs comparison": sales_column(r),
+            "Sales change": sales_column(r),
             "Data quality": "OK" if e.validity == "ok" else e.validity.replace("_", " "),
         })
     frame = pd.DataFrame(rows)
-    st.session_state["table_ids"] = [event_id(e) for e in visible]
-    st.dataframe(frame, hide_index=True, width="stretch", key="table",
-                 on_select=pick_from_table, selection_mode="single-row")
+    ids = [event_id(e) for e in visible]
+    st.session_state["table_ids"] = ids
+    # The rows shown are part of the key too: a filter change must not leave a
+    # tick on whatever finding now sits at that row number.
+    key = f"table-{st.session_state.get('table_nonce', 0)}-{zlib.crc32('|'.join(ids).encode())}"
+    st.dataframe(frame, hide_index=True, width="stretch", key=key,
+                 on_select=partial(pick_from_table, key), selection_mode="single-row")
     export = frame.assign(
         **{"Priority score": [e.informativeness for e in visible],
            "Evidence score": [e.detection_confidence for e in visible],
-           "Sales change vs comparison": [getattr(reads[event_id(e)], "effect", None)
+           "Sales change ratio": [getattr(reads[event_id(e)], "effect", None)
                                           for e in visible],
            "Rough return per 1 spent": [getattr(reads[event_id(e)], "rough_return", None)
                                         for e in visible]})
@@ -210,12 +246,16 @@ def kpis(e, r, panel) -> None:
                           delta_description="vs reference",
                           help=f"{r.sales_reference:,.0f}/day in the reference window."))
         tiles.append(dict(
-            label="Vs comparison", value=f"{r.effect:+.1%}",
+            label=comparison_label(r), value=f"{r.effect:+.1%}",
             delta=f"±{r.swing:.1%}" if r.swing is not None else None,
             delta_arrow="off",
             delta_description="readable" if r.readable else "unclear",
-            help="Sales change that comparison markets did not share. Readable when it is "
-                 "at least twice the typical swing seen at other times of year."))
+            help=("Sales change that comparison markets did not share. "
+                  if r.comparison_markets else
+                  "Sales change against the reference window; no comparison markets. ")
+                 + ("Readable when it is at least twice the typical swing seen at other "
+                    "times of year." if r.swing is not None else
+                    "Too little history to judge how much sales normally swing.")))
         tiles.append(dict(
             label="Rough return",
             value=f"{r.rough_return:,.2f}" if r.rough_return is not None else "—",
@@ -223,8 +263,7 @@ def kpis(e, r, panel) -> None:
                  "readable and spend moved by at least 10%."))
     if e.event_type == "dark_period" and r.baseline is not None:
         tiles.append(dict(label="Baseline sales/day", value=compact(r.baseline),
-                          help=f"Sales with no advertising running. About {-r.effect:.0%} "
-                               "of sales went with advertising (rough)."))
+                          help=baseline_help(r)))
     elif e.event_type == "step_change" and r.spend_reference > 0:
         tiles.append(dict(label="Spend multiple",
                           value=f"{r.spend_during / r.spend_reference:.1f}×",

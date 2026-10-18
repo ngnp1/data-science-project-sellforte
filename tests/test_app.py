@@ -86,5 +86,60 @@ app.main()
     app = AppTest.from_string(script, default_timeout=60).run()
     assert not app.exception
     assert len(app.dataframe[0].value) == 6
-    assert set(app.dataframe[0].value["Sales vs comparison"]) == {"No sales reading"}
+    assert set(app.dataframe[0].value["Sales change"]) == {"No sales reading"}
     assert [m.label for m in app.metric][4:] == ["Affected spend/day"]
+
+
+def _single_market_readouts():
+    from dataclasses import replace  # noqa: F401  (used by callers)
+    import pandas as pd
+    from detection.io.panel import build_panel
+    from detection.pipeline import run_detection
+    from ui.readout import readout
+    root = Path(APP).parent / "synthetic_data_generator/data"
+    media, sales = pd.read_csv(root / "media.csv"), pd.read_csv(root / "sales.csv")
+    media, sales = media[media.country_code == "DE"], sales[sales.country_code == "DE"]
+    events = run_detection(media, sales)
+    panel = build_panel(media, sales)
+    return {e.event_type: (e, readout(e, panel, events)) for e in events}
+
+
+def test_copy_never_claims_comparison_markets_that_do_not_exist():
+    import app as viewer
+    e, r = _single_market_readouts()["channel_pulse"]
+    assert r.comparison_markets == () and r.effect is not None
+    assert "comparison" not in viewer.headline(e, r).lower()
+    assert "no comparison" in viewer.sales_column(r)
+    assert viewer.comparison_label(r) == "Sales change"
+    assert any("No comparison markets" in line for line in viewer.caveats(e, r))
+
+
+def test_copy_when_history_is_too_short_to_judge_swings():
+    from dataclasses import replace
+    import app as viewer
+    e, r = _single_market_readouts()["channel_pulse"]
+    unknown = replace(r, swing=None, readable=False)
+    assert "too little history" in viewer.headline(e, unknown).lower()
+    assert "normal swings" not in viewer.headline(e, unknown)
+    assert "too little history" in viewer.sales_column(unknown)
+
+
+def test_baseline_help_only_claims_a_share_when_it_is_readable_and_negative():
+    from dataclasses import replace
+    import app as viewer
+    e, r = _single_market_readouts()["dark_period"]
+    assert "38%" in viewer.baseline_help(replace(r, effect=-0.38, readable=True))
+    assert "went with advertising" not in viewer.baseline_help(replace(r, effect=0.05, readable=True))
+    assert "went with advertising" not in viewer.baseline_help(replace(r, effect=-0.38, readable=False))
+
+
+def test_table_starts_fresh_when_the_selection_changes_elsewhere():
+    # A keyed st.dataframe keeps its row ticks across reruns; a new key is the
+    # only way to stop a stale tick pointing at a different finding.
+    app = run_app()
+    first = app.dataframe[0].key
+    app.button(key="inspect-2").click().run()
+    second = app.dataframe[0].key
+    assert second != first
+    app.sidebar.multiselect[0].set_value(["AT", "FI"]).run()
+    assert app.dataframe[0].key not in (first, second)

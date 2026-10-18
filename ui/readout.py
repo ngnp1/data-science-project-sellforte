@@ -35,6 +35,7 @@ PLACEBO_STEP_DAYS = 7
 MIN_PLACEBOS = 5
 READABLE_MULTIPLE = 2.0
 MIN_SPEND_CHANGE = 0.10
+OTHER_SPEND_SHARE = 0.5
 
 
 @dataclass(frozen=True)
@@ -62,19 +63,37 @@ def _window(dates: pd.DatetimeIndex, start: pd.Timestamp,
     return pd.Series((dates >= start) & (dates <= end), index=dates)
 
 
-def masks(event: DetectedEvent, panel: Panel
-          ) -> tuple[pd.Series, pd.Series, str] | None:
-    """(during, reference, side) as boolean masks on panel.dates, or None
-    when no reference window of at least REFERENCE_MIN_DAYS exists."""
+def _other_findings(event: DetectedEvent, panel: Panel,
+                    events: list[DetectedEvent]) -> pd.Series:
+    """Days covered by any other finding in the same market."""
+    blocked = pd.Series(False, index=panel.dates)
+    for other in events:
+        if other.country_code == event.country_code and other != event:
+            blocked |= _window(panel.dates, other.start, other.end)
+    return blocked
+
+
+def masks(event: DetectedEvent, panel: Panel, events: list[DetectedEvent] = ()
+          ) -> tuple[pd.Series, pd.Series, str, bool] | None:
+    """(during, reference, side, trimmed) as boolean masks on panel.dates, or
+    None when no reference window of at least REFERENCE_MIN_DAYS exists.
+
+    A reference window that runs into another finding in the same market
+    would compare the event with a second unusual period -- a step change
+    read against the pause just before it, say. So a clean before-window is
+    preferred, then a clean after-window; only when neither is clean are the
+    other finding's days cut out of the longer side, and `trimmed` says so.
+    """
     dates = panel.dates
+    blocked = _other_findings(event, panel, events)
     span = _window(dates, event.start, event.end)
     if event.event_type == "channel_pulse" and event.components:
         during = pd.Series(False, index=dates)
         for start, end in event.components:
             during |= _window(dates, start, end)
         on_days = span & ~during
-        if on_days.sum() >= REFERENCE_MIN_DAYS:
-            return during, on_days, "on-days"
+        if (on_days & ~blocked).sum() >= REFERENCE_MIN_DAYS:
+            return during, on_days & ~blocked, "on-days", bool((on_days & blocked).any())
     else:
         during = span
 
@@ -82,12 +101,16 @@ def masks(event: DetectedEvent, panel: Panel
     first = int(np.flatnonzero(span.values)[0])
     last = int(np.flatnonzero(span.values)[-1])
     positions = np.arange(len(dates))
-    before = (positions >= first - length) & (positions < first)
-    if before.sum() >= REFERENCE_MIN_DAYS:
-        return during, pd.Series(before, index=dates), "before"
-    after = (positions > last) & (positions <= last + length)
-    if after.sum() >= REFERENCE_MIN_DAYS:
-        return during, pd.Series(after, index=dates), "after"
+    sides = [
+        ("before", pd.Series((positions >= first - length) & (positions < first), index=dates)),
+        ("after", pd.Series((positions > last) & (positions <= last + length), index=dates)),
+    ]
+    for side, window in sides:
+        if window.sum() >= REFERENCE_MIN_DAYS and not (window & blocked).any():
+            return during, window, side, False
+    side, window = max(sides, key=lambda s: int((s[1] & ~blocked).sum()))
+    if (window & ~blocked).sum() >= REFERENCE_MIN_DAYS:
+        return during, window & ~blocked, side, True
     return None
 
 
@@ -130,7 +153,7 @@ def _effect(sales: dict[str, np.ndarray], country: str, peers: list[str],
 def _swing(sales: dict[str, np.ndarray], country: str, peers: list[str],
            during: np.ndarray, reference: np.ndarray,
            blocked: np.ndarray) -> float | None:
-    """Spread of the same effect computed at every other weekly offset."""
+    """Typical size of the same effect computed at every other weekly offset."""
     n = len(blocked)
     d_idx, r_idx = np.flatnonzero(during), np.flatnonzero(reference)
     both = np.concatenate([d_idx, r_idx])
@@ -147,21 +170,29 @@ def _swing(sales: dict[str, np.ndarray], country: str, peers: list[str],
             values.append(result[0])
     if len(values) < MIN_PLACEBOS:
         return None
-    return float(np.std(values, ddof=1))
+    # Root-mean-square around zero, not the standard deviation around the
+    # placebos' own mean: a market drifting against its peers gives every
+    # placebo the same bias, and that drift is exactly what must not pass
+    # for a real change.
+    return float(np.sqrt(np.mean(np.square(values))))
 
 
 def readout(event: DetectedEvent, panel: Panel,
             events: list[DetectedEvent]) -> Readout | None:
-    windows = masks(event, panel)
+    windows = masks(event, panel, events)
     if windows is None:
         return None
-    during, reference, side = windows
+    during, reference, side, trimmed = windows
     country = event.country_code
     channels = tuple(subject_channels(event, panel))
     spend = sum((panel.series(country, ch) for ch in channels),
                 pd.Series(0.0, index=panel.dates))
     spend_reference = float(spend[reference].mean())
     spend_during = float(spend[during].mean())
+    others = [ch for ch in panel.channels_in(country) if ch not in channels]
+    other_spend = sum((panel.series(country, ch) for ch in others),
+                      pd.Series(0.0, index=panel.dates))
+    other_change = float(other_spend[during].mean() - other_spend[reference].mean())
 
     empty = dict(comparison_markets=(), sales_reference=None, sales_during=None,
                  effect=None, swing=None, readable=False, sales_difference=None,
@@ -193,12 +224,26 @@ def readout(event: DetectedEvent, panel: Panel,
     sales_during = float(np.nanmean(sales[country][d]))
     sales_difference = sales_reference * b * effect
     spend_change = spend_during - spend_reference
+    notes = []
     rough_return = None
     if (readable and spend_change != 0
             and abs(spend_change) >= MIN_SPEND_CHANGE * max(spend_reference, spend_during)):
-        rough_return = sales_difference / spend_change
-
-    notes = []
+        # A return divides the whole sales change by one channel's spend
+        # change, so it is withheld whenever that attribution is plainly wrong.
+        if abs(other_change) > OTHER_SPEND_SHARE * abs(spend_change):
+            notes.append("Spend on other channels also changed, so the sales change "
+                         "cannot be put down to this one alone; no rough return.")
+        elif sales_difference * spend_change < 0:
+            notes.append("Sales moved the opposite way to spend, so something else "
+                         "probably drove them; no rough return.")
+        elif "confounded" in event.tags:
+            notes.append("Another finding overlaps this one, so their effects cannot "
+                         "be separated; no rough return.")
+        else:
+            rough_return = sales_difference / spend_change
+    if trimmed:
+        notes.append("The reference window skips days covered by another finding "
+                     "in this market.")
     if not used:
         notes.append("No comparison markets without their own findings in these weeks, "
                      "so the sales change also includes any seasonality or trend.")
