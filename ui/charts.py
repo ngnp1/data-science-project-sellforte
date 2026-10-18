@@ -17,7 +17,7 @@ from plotly.subplots import make_subplots
 from detection.io.panel import Panel
 from detection.model import DetectedEvent
 from detection.score import subject_channels
-from ui.labels import SCORE_NAMES, TYPES, event_id, title
+from ui.labels import TYPES, event_id, title
 from ui.readout import Readout
 
 SLOTS_LIGHT = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100",
@@ -27,7 +27,7 @@ SLOTS_DARK = ("#3987e5", "#d95926", "#199e70", "#c98500",
 INK = {False: "#0b0b0b", True: "#f0efec"}
 MUTED = "#898781"
 SHADE = {False: "#52514e", True: "#c3c2b7"}
-FONT = "system-ui, -apple-system, 'Segoe UI', sans-serif"
+FONT = "Inter, system-ui, sans-serif"
 DAY = pd.Timedelta(days=1)
 CARRYOVER_DAYS = (-14, 28)
 
@@ -243,17 +243,3 @@ def carryover_chart(event: DetectedEvent, panel: Panel, rd: Readout | None,
     fig.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.25,
                                   xanchor="left", x=0))
     return fig
-
-
-def score_bars(parts: dict[str, float], dark: bool = False) -> go.Figure:
-    names = [SCORE_NAMES.get(k, (k, ""))[0] for k in parts]
-    meanings = [SCORE_NAMES.get(k, (k, ""))[1] for k in parts]
-    fig = go.Figure(go.Bar(
-        orientation="h", y=names, x=list(parts.values()), customdata=meanings,
-        marker=dict(color=(SLOTS_DARK if dark else SLOTS_LIGHT)[0]), width=0.6,
-        text=[f"{v:.2f}" for v in parts.values()], textposition="outside",
-        hovertemplate="<b>%{y}</b>: %{x:.2f}<br>%{customdata}<extra></extra>"))
-    fig.update_xaxes(range=[0, 1.15], fixedrange=True, showticklabels=False)
-    fig.update_yaxes(autorange="reversed", fixedrange=True)
-    fig.update_layout(showlegend=False)
-    return _base_layout(fig, 50 + 30 * len(parts))

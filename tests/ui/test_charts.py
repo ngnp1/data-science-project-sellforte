@@ -2,7 +2,7 @@ from dataclasses import replace
 
 import pandas as pd
 
-from ui.charts import carryover_chart, event_chart, period_map, score_bars
+from ui.charts import carryover_chart, event_chart, period_map
 from ui.labels import SCORE_NAMES, TYPES, event_id
 from ui.readout import readout
 
@@ -67,10 +67,6 @@ def test_carryover_only_for_pulses(sample_events, sample_panel):
     assert carryover_chart(dark, sample_panel, readout(dark, sample_panel, sample_events)) is None
 
 
-def test_score_bars_use_plain_names():
-    fig = score_bars({"contrast": 1.0, "sales_snr": 0.25})
-    assert list(fig.data[0].y) == [SCORE_NAMES["contrast"][0], SCORE_NAMES["sales_snr"][0]]
-    assert list(fig.data[0].x) == [1.0, 0.25]
 
 
 def test_event_chart_marks_missing_data_rows(sample_frames, sample_events):

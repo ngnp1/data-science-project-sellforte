@@ -13,8 +13,9 @@ import streamlit as st
 
 from detection.io.panel import build_panel
 from detection.pipeline import run_detection
-from ui.charts import carryover_chart, event_chart, period_map, score_bars
-from ui.labels import TYPES, event_id, evidence_band, priority_band, ranked, title
+from ui.charts import carryover_chart, event_chart, period_map
+from ui.labels import (TYPES, event_id, evidence_band, priority_band, ranked, score_rows,
+                       title)
 from ui.readout import readout
 
 SAMPLE = Path(__file__).parent / "synthetic_data_generator/data"
@@ -168,14 +169,33 @@ def caveats(e, r) -> list[str]:
     return out
 
 
+def summary_cards(visible, markets) -> list[tuple[str, str, str]]:
+    """(label, value, description) for the summary strip."""
+    with_findings = len({e.country_code for e in visible})
+    return [
+        ("Findings", str(len(visible)), f"in {with_findings} markets"),
+        ("Markets with findings", f"{with_findings} of {len(markets)}",
+         "markets with at least one finding"),
+        ("High priority", str(sum(priority_band(e.informativeness) == "High" for e in visible)),
+         "priority score ≥ 0.75"),
+        ("With data warnings", str(sum(e.validity != "ok" for e in visible)),
+         "check before using"),
+    ]
+
+
+def card_badges(e) -> list[tuple[str, str]]:
+    """(text, shadcn badge variant) for a finding's card."""
+    badges = [(TYPES[e.event_type].name, "outline"),
+              (f"Priority {priority_band(e.informativeness)}", "default"),
+              (f"Evidence {evidence_band(e.detection_confidence)}", "secondary")]
+    if e.validity != "ok":
+        badges.append(("Data warning", "destructive"))
+    return badges
+
+
 def summary(visible, markets) -> None:
-    cols = st.columns(4)
-    cols[0].metric("Findings", len(visible))
-    cols[1].metric("Markets with findings",
-                   f"{len({e.country_code for e in visible})} of {len(markets)}")
-    cols[2].metric("High priority",
-                   sum(priority_band(e.informativeness) == "High" for e in visible))
-    cols[3].metric("With data warnings", sum(e.validity != "ok" for e in visible))
+    for col, (label, value, description) in zip(st.columns(4), summary_cards(visible, markets)):
+        col.metric(label, value, help=description)
 
 
 def cards(visible, rank, reads, selected, dark) -> None:
@@ -228,52 +248,53 @@ def table(visible, rank, reads) -> None:
                        "findings.csv", "text/csv")
 
 
+def kpi_tiles(e, r, panel) -> list[dict]:
+    """label / value / description for the readout tiles; empty without a readout."""
+    if r is None:
+        return []
+
+    def versus(now, before):
+        change = f"{now / before - 1:+.0%} vs reference" if before else "reference was 0"
+        return f"{change} ({compact(before)}/day)"
+
+    tiles = [dict(label="Affected spend/day", value=compact(r.spend_during),
+                  description=f"{subject_label(e, r).capitalize()}: "
+                              f"{versus(r.spend_during, r.spend_reference)}")]
+    if r.sales_reference is not None:
+        tiles.append(dict(label="Market sales/day", value=compact(r.sales_during),
+                          description=versus(r.sales_during, r.sales_reference)))
+        if r.swing is None:
+            judged = "too little history to judge"
+        else:
+            judged = f"{'readable' if r.readable else 'unclear'} · typical swing ±{r.swing:.1%}"
+        tiles.append(dict(label=comparison_label(r), value=f"{r.effect:+.1%}",
+                          description=judged))
+        tiles.append(dict(
+            label="Rough return",
+            value=f"{r.rough_return:,.2f}" if r.rough_return is not None else "—",
+            description="extra sales per extra 1 spent" if r.rough_return is not None
+            else "shown only for a readable change"))
+    if e.event_type == "dark_period" and r.baseline is not None:
+        tiles.append(dict(label="Baseline sales/day", value=compact(r.baseline),
+                          description=baseline_help(r)))
+    elif e.event_type == "step_change" and r.spend_reference > 0:
+        tiles.append(dict(label="Spend multiple",
+                          value=f"{r.spend_during / r.spend_reference:.1f}×",
+                          description="spend during the step ÷ spend before it"))
+    elif e.event_type == "single_channel" and e.channel:
+        running = panel.series(e.country_code, e.channel)[r.during].mean()
+        tiles.append(dict(label="Running channel/day", value=compact(running),
+                          description=f"{e.channel}, the one channel still running"))
+    return tiles
+
+
 def kpis(e, r, panel) -> None:
     if r is None:
         st.info("Not enough data around this period for a sales reading.")
         return
-    def change(now, before):
-        return f"{now / before - 1:+.0%}" if before else None
-
-    tiles = [dict(label="Affected spend/day", value=compact(r.spend_during),
-                  delta=change(r.spend_during, r.spend_reference),
-                  delta_description="vs reference",
-                  help=f"Daily spend on {subject_label(e, r)}; "
-                       f"{r.spend_reference:,.0f}/day in the reference window.")]
-    if r.sales_reference is not None:
-        tiles.append(dict(label="Market sales/day", value=compact(r.sales_during),
-                          delta=change(r.sales_during, r.sales_reference),
-                          delta_description="vs reference",
-                          help=f"{r.sales_reference:,.0f}/day in the reference window."))
-        tiles.append(dict(
-            label=comparison_label(r), value=f"{r.effect:+.1%}",
-            delta=f"±{r.swing:.1%}" if r.swing is not None else None,
-            delta_arrow="off",
-            delta_description="readable" if r.readable else "unclear",
-            help=("Sales change that comparison markets did not share. "
-                  if r.comparison_markets else
-                  "Sales change against the reference window; no comparison markets. ")
-                 + ("Readable when it is at least twice the typical swing seen at other "
-                    "times of year." if r.swing is not None else
-                    "Too little history to judge how much sales normally swing.")))
-        tiles.append(dict(
-            label="Rough return",
-            value=f"{r.rough_return:,.2f}" if r.rough_return is not None else "—",
-            help="Extra sales per extra unit of spend. Only shown when the change is "
-                 "readable and spend moved by at least 10%."))
-    if e.event_type == "dark_period" and r.baseline is not None:
-        tiles.append(dict(label="Baseline sales/day", value=compact(r.baseline),
-                          help=baseline_help(r)))
-    elif e.event_type == "step_change" and r.spend_reference > 0:
-        tiles.append(dict(label="Spend multiple",
-                          value=f"{r.spend_during / r.spend_reference:.1f}×",
-                          help="Spend during the step divided by spend before it."))
-    elif e.event_type == "single_channel" and e.channel:
-        running = panel.series(e.country_code, e.channel)[r.during].mean()
-        tiles.append(dict(label="Running channel/day", value=compact(running),
-                          help=f"Daily spend on {e.channel}, the one channel that kept running."))
+    tiles = kpi_tiles(e, r, panel)
     for col, tile in zip(st.columns(len(tiles)), tiles):
-        col.metric(**tile, delta_color="off", border=True)
+        col.metric(tile["label"], tile["value"], help=tile["description"], border=True)
 
     side = {"before": "the same number of days just before it",
             "after": "the same number of days just after it (the data starts too late for a before window)",
@@ -300,11 +321,11 @@ def inspect(e, r, rank, panel, dark) -> None:
         st.caption("Rule-based scores from 0 to 1, not probabilities.")
         left, right = st.columns(2)
         left.markdown("**Evidence that it happened**")
-        left.plotly_chart(score_bars(e.evidence.get("confidence_sub_scores", {}), dark),
-                          key="evidence-scores", width="stretch")
+        for name, _, value in score_rows(e.evidence.get("confidence_sub_scores", {})):
+            left.markdown(f"{name} · {value:.2f}")
         right.markdown("**How useful it is**")
-        right.plotly_chart(score_bars(e.evidence.get("informativeness_drivers", {}), dark),
-                           key="usefulness-scores", width="stretch")
+        for name, _, value in score_rows(e.evidence.get("informativeness_drivers", {})):
+            right.markdown(f"{name} · {value:.2f}")
     with st.expander("Caveats", expanded=bool(caveats(e, r))):
         for line in caveats(e, r) or ["No caveats found for this finding."]:
             st.markdown(f"- {line}")

@@ -1,6 +1,6 @@
 from detection.model import EVENT_TYPES
 from ui.labels import (SCORE_NAMES, TYPES, event_id, evidence_band,
-                       priority_band, ranked, title)
+                       priority_band, ranked, score_rows, title)
 
 
 def test_every_event_type_has_copy_and_colours():
@@ -59,3 +59,9 @@ def test_event_ids_are_unique_and_stable(sample_events):
     assert len(set(ids)) == len(ids)
     dark = next(e for e in sample_events if e.event_type == "dark_period")
     assert event_id(dark) == "DE|ALL|dark_period|2024-06-24"
+
+
+def test_score_rows_keep_order_and_plain_names():
+    rows = score_rows({"contrast": 1.0, "mystery": 0.2})
+    assert rows == [(SCORE_NAMES["contrast"][0], SCORE_NAMES["contrast"][1], 1.0),
+                    ("mystery", "", 0.2)]

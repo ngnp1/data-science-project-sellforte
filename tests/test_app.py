@@ -143,3 +143,63 @@ def test_table_starts_fresh_when_the_selection_changes_elsewhere():
     assert second != first
     app.sidebar.multiselect[0].set_value(["AT", "FI"]).run()
     assert app.dataframe[0].key not in (first, second)
+
+
+def _analyzed(markets=None, with_sales=True):
+    import pandas as pd
+    from detection.io.panel import build_panel
+    from detection.pipeline import run_detection
+    from ui.readout import readout
+    root = Path(APP).parent / "synthetic_data_generator/data"
+    media, sales = pd.read_csv(root / "media.csv"), pd.read_csv(root / "sales.csv")
+    if markets:
+        media, sales = media[media.country_code.isin(markets)], sales[sales.country_code.isin(markets)]
+    sales = sales if with_sales else None
+    events = run_detection(media, sales)
+    panel = build_panel(media, sales)
+    return events, panel, {e.event_type: (e, readout(e, panel, events)) for e in events}
+
+
+def test_card_badges_flag_data_warnings():
+    from dataclasses import replace
+    import app as viewer
+    _, _, by_type = _analyzed()
+    e, _ = by_type["dark_period"]
+    assert viewer.card_badges(e)[:3] == [("All advertising off", "outline"),
+                                         ("Priority High", "default"),
+                                         ("Evidence Strong", "secondary")]
+    assert ("Data warning", "destructive") not in viewer.card_badges(e)
+    assert ("Data warning", "destructive") in viewer.card_badges(replace(e, validity="suspect_data_gap"))
+
+
+def test_summary_cards_on_the_sample():
+    import app as viewer
+    events, panel, _ = _analyzed()
+    assert viewer.summary_cards(events, panel.countries) == [
+        ("Findings", "6", "in 5 markets"),
+        ("Markets with findings", "5 of 5", "markets with at least one finding"),
+        ("High priority", "5", "priority score ≥ 0.75"),
+        ("With data warnings", "0", "check before using"),
+    ]
+
+
+def test_kpi_tiles_labels_by_finding_type():
+    import app as viewer
+    events, panel, by_type = _analyzed()
+    base = ["Affected spend/day", "Market sales/day", "Vs comparison", "Rough return"]
+    labels = {k: [t["label"] for t in viewer.kpi_tiles(e, r, panel)] for k, (e, r) in by_type.items()}
+    assert labels["dark_period"] == base + ["Baseline sales/day"]
+    assert labels["step_change"] == base + ["Spend multiple"]
+    assert labels["single_channel"] == base + ["Running channel/day"]
+    assert all(set(t) == {"label", "value", "description"}
+               for e, r in by_type.values() for t in viewer.kpi_tiles(e, r, panel))
+    _, bare_panel, bare = _analyzed(with_sales=False)
+    e, r = bare["natural_holdout"]
+    assert [t["label"] for t in viewer.kpi_tiles(e, r, bare_panel)] == ["Affected spend/day"]
+
+
+def test_kpi_tiles_empty_without_readout():
+    import app as viewer
+    _, panel, by_type = _analyzed()
+    e, _ = by_type["dark_period"]
+    assert viewer.kpi_tiles(e, None, panel) == []

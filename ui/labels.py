@@ -77,6 +77,11 @@ SCORE_NAMES: dict[str, tuple[str, str]] = {
 }
 
 
+def score_rows(parts: dict[str, float]) -> list[tuple[str, str, float]]:
+    """(plain name, meaning, value) per sub-score or driver, in input order."""
+    return [(*SCORE_NAMES.get(key, (key, "")), value) for key, value in parts.items()]
+
+
 def priority_band(score: float | None) -> str:
     if score is None:
         return "Unscored"
