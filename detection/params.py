@@ -104,9 +104,17 @@ PULSE_LEN_IQR_RATIO = 0.5
 
 # --- P4, onsets and the cross-market layer ----------------------------------
 
-# Spread in onset dates across markets, in days, above which the channel is
-# reported as a staggered launch rather than coincidental start-up jitter.
+# Minimum separation of each reported onset from the earliest qualified onset.
 ONSET_SPREAD = 14
+LAUNCH_ACTIVE_DAYS = 14
+
+# Provisional analysis-readiness screening rules, not causal identification.
+LAUNCH_PRE_DAYS = 56
+LAUNCH_POST_DAYS = 28
+LAUNCH_WEEK_DAYS = 7
+LAUNCH_COMPETING_CHANGE = 0.25
+LAUNCH_SALES_CORRELATION = 0.8
+LAUNCH_SALES_DRIFT = 0.1
 
 # --- Section 8, confidence sub-scores ------------------------------------
 

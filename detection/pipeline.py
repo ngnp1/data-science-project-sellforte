@@ -32,10 +32,12 @@ from dataclasses import replace
 
 import pandas as pd
 
-from detection.compose.cross_market import annotate, find_staggered_launches
+from detection.compose.cross_market import annotate
+from detection.compose.staggered_launch.detector import find_staggered_launches
 from detection.compose.label import label_market
 from detection.explain import explain
 from detection.io.panel import build_panel
+from detection.compose.staggered_launch.readiness import verify_staggered_launches
 from detection.model import DetectedEvent
 from detection.score import confidence, informativeness
 from detection.validity import assess
@@ -89,8 +91,9 @@ def run_detection(media_df: pd.DataFrame, sales_df: pd.DataFrame | None = None,
             validity_reasons=reasons,
             evidence=evidence,
         )
-        scored.append(replace(e, explanation=explain(e, panel)))
-    events = scored
+        scored.append(e)
+    events = [replace(e, explanation=explain(e, panel))
+              for e in verify_staggered_launches(scored, panel)]
 
     events.sort(key=lambda e: (str(e.country_code), e.start, str(e.channel),
                                e.event_type))
