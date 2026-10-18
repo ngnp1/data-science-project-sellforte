@@ -414,6 +414,60 @@ truth: the channel is off from the first day in the US while running in other ma
 the launch definition word for word, so spend alone cannot tell the two apart; it is the same
 period that is the holdout FN. Full dev run: 4 min this time.
 
+## Step change
+
+**Definition** (`benchmark/BENCHMARK.md:42`): a channel's spend jumps to a new level and remains
+there. The docs give no magnitude; the evaluator only breaks results down by it
+(`benchmark/eval/README.md:52`). Gradual ramps are an explicit non-event (`ramp_block` in
+`NON_EVENT_TYPES`, `benchmark/eval/model.py:12`). Under our 15 % rule, a drop that stays above 15 %
+of usual (e.g. to 30 %) is a step change; a drop to 15 % or less is "off" and belongs to the
+on/off detectors.
+
+**Method** (`step.py`, not an HMM: a new level can be any size, so a fixed set of states doesn't fit):
+1. x = log spend on days the channel is on (layer-C P(off) < 0.5, data present, spend above the
+   15 % cutoff), so 2x up and 0.5x down are the same size and off spells are skipped.
+2. **Bayesian online changepoint detection** (Adams & MacKay 2007): Gaussian segments with
+   unknown mean, noise from the series itself (MAD of day-to-day differences), constant hazard
+   1/100 (prior: a budget level lasts about a quarter). A change is read from the run-length
+   posterior two weeks later, P(a new run started within ±3 days); peaks above 0.5 are changes,
+   each placed at the best mean-shift split within ±7 days (removes online detection delay).
+3. A step is a jump of at least **1.5x** up or down between neighbouring stretches (stated domain
+   threshold, not fitted), with 7+ days on each side, and:
+   - **abrupt**: around the change, the best-fitting transition (1, 7, 14, 28 or 56 days, placed
+     anywhere containing the change) takes at most a week; ramps take longer;
+   - **not a return**: getting back to the level before an excursion is not a new level.
+4. It lasts until spend comes back within 1.5x of the old level, or to the end of the data.
+5. Confidence = the change's posterior score (above), in [0, 1].
+
+**Synthetic checks** (`tests/pulse/test_step.py`, 30 seeds each, 365 days, noise sigma 0.3):
+
+| case | expected | result |
+|---|---|---|
+| 2x for 60 days | step | found 30/30 |
+| 0.6x for 60 days | step | found 29/30 |
+| drop to 30 % and hold | step | found 30/30 |
+| 1.5x for 60 days | step (at the threshold) | found 9/30 |
+| linear ramp to 2x over 60 days, then hold | no step | fires 7/30 |
+| staircase ramp 1.2→2.0x in 10-day blocks, then back | no step | fires 4/30 |
+| pure noise, sigma 0.2 / 0.6 / 1.0 (100 seeds each, 1 and 2 years) | no step | fires 0–1 / 100 |
+
+An extra "the stretches themselves must not drift" rule was tried and deleted: it cost as many
+true steps as the ramp fires it saved.
+
+**Dev scores** (test split untouched):
+
+| | teammate detection-library | this |
+|---|---|---|
+| step_change P / R / F1 | 0.647 / 0.846 / 0.733 (11 TP / 6 FP / 2 FN) | **1.000 / 1.000 / 1.000 (13 / 0 / 0)** |
+| boundary error (median / p90 days) | – | 0 / 0 |
+| confidence (13 detections) | – | 0.856–0.984, all correct |
+| channel_pulse / dark / holdout / single / launch | – | 10/0/0, 12/0/0, 17/3/3, 7/0/3, 10/1/0 (all unchanged) |
+| null FP per country-year | – | 0.000 |
+
+No misses on dev, including the benchmark's own ramp (dev_044) and the two 1.5x steps (dev_029,
+dev_031), which the synthetic checks say are found only about a third of the time. Full dev run
+with every detector: about 3.5 min.
+
 ## Next steps
 
 1. Get pulses with wrong or low-confidence detections (a harder benchmark or real data) so the

@@ -1,5 +1,5 @@
-"""Score hook: media.csv in, channel_pulse, natural_holdout, single_channel, dark_period and
-staggered_launch Events out.
+"""Score hook: media.csv in, channel_pulse, natural_holdout, single_channel, dark_period,
+staggered_launch and step_change Events out.
 
     python -m benchmark.eval.run_dev --detector pulse.detect:detect --load-data     # layer C (default)
     python -m benchmark.eval.run_dev --detector pulse.detect:detect_b --load-data   # layer B
@@ -15,6 +15,7 @@ from pulse.onoff import RHO, active_level, p_off, p_off_hmm
 from pulse.holdout import (find_dark_periods, find_holdouts, find_single_channel,
                            find_staggered_launches, market_p_off)
 from pulse.pulse import find_pulse_trains, off_spells, pulse_probability
+from pulse.step import find_steps
 
 
 def run_series(s: pd.Series, present: pd.Series | None = None, layer: str = "A"):
@@ -66,6 +67,11 @@ def detect(media_df, sales_df, sid: str, layer: str = "C") -> list[Event]:
         events += [Event(sid=sid, country_code=country, channel=None, event_type="dark_period",
                          start=a, end=b, detection_confidence=conf)
                    for a, b, conf in find_dark_periods(market, p)]
+        for channel, pc in p.items():
+            s, present = market[channel]
+            events += [Event(sid=sid, country_code=country, channel=channel, event_type="step_change",
+                             start=a, end=b, multiplier=ratio, detection_confidence=conf)
+                       for a, b, ratio, conf in find_steps(s, (pc < 0.5) & present & (s > RHO * active_level(s)))]
     events += [Event(sid=sid, country_code=country, channel=channel, event_type="staggered_launch",
                      start=a, end=b, detection_confidence=conf)
                for country, channel, a, b, conf in find_staggered_launches(markets, ps)]
