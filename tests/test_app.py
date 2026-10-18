@@ -67,14 +67,14 @@ def test_empty_filters_show_a_message():
     app = run_app()
     app.sidebar.multiselect[0].set_value([]).run()
     assert not app.exception
-    assert any("No findings match" in m.value for m in app.info)
+    assert any("Nothing matches these filters" in m.value for m in app.info)
 
 
 def test_upload_mode_waits_for_media():
     app = run_app()
     app.sidebar.radio[0].set_value("Upload CSV files").run()
     assert not app.exception
-    assert any("Upload media" in m.value for m in app.info)
+    assert any("Upload a media CSV" in m.value for m in app.info)
 
 
 def test_media_without_sales_renders_spend_only():
@@ -90,7 +90,7 @@ app.main()
     app = AppTest.from_string(script, default_timeout=60).run()
     assert not app.exception
     assert len(app.dataframe[0].value) == 6
-    assert set(app.dataframe[0].value["Sales change"]) == {"No sales reading"}
+    assert set(app.dataframe[0].value["Sales change"]) == {"No sales data"}
 
 
 def _single_market_readouts():
@@ -111,9 +111,9 @@ def test_copy_never_claims_comparison_markets_that_do_not_exist():
     import app as viewer
     e, r = _single_market_readouts()["channel_pulse"]
     assert r.comparison_markets == () and r.effect is not None
-    assert "no comparison" in viewer.sales_column(r)
+    assert "no other markets" in viewer.sales_column(r)
     assert viewer.comparison_label(r) == "Sales change"
-    assert any("No comparison markets" in line for line in viewer.caveats(e, r))
+    assert any("No other market" in line for line in viewer.caveats(e, r))
 
 
 def test_copy_when_history_is_too_short_to_judge_swings():
@@ -121,7 +121,7 @@ def test_copy_when_history_is_too_short_to_judge_swings():
     import app as viewer
     e, r = _single_market_readouts()["channel_pulse"]
     unknown = replace(r, swing=None, readable=False)
-    assert "too little history" in viewer.sales_column(unknown)
+    assert "not enough history" in viewer.sales_column(unknown)
 
 
 def test_baseline_help_only_claims_a_share_when_it_is_readable_and_negative():
@@ -129,8 +129,8 @@ def test_baseline_help_only_claims_a_share_when_it_is_readable_and_negative():
     import app as viewer
     e, r = _single_market_readouts()["dark_period"]
     assert "38%" in viewer.baseline_help(replace(r, effect=-0.38, readable=True))
-    assert "went with advertising" not in viewer.baseline_help(replace(r, effect=0.05, readable=True))
-    assert "went with advertising" not in viewer.baseline_help(replace(r, effect=-0.38, readable=False))
+    assert "came with advertising" not in viewer.baseline_help(replace(r, effect=0.05, readable=True))
+    assert "came with advertising" not in viewer.baseline_help(replace(r, effect=-0.38, readable=False))
 
 
 def test_table_starts_fresh_when_its_rows_change():
@@ -177,16 +177,16 @@ def _analyzed(markets=None, with_sales=True):
 def test_kpi_tiles_labels_by_finding_type():
     import app as viewer
     events, panel, by_type = _analyzed()
-    base = ["Affected spend/day", "Market sales/day", "Vs comparison", "Rough return"]
+    base = ["Spend/day", "Sales/day", "Vs other markets", "Return"]
     labels = {k: [t["label"] for t in viewer.kpi_tiles(e, r, panel)] for k, (e, r) in by_type.items()}
-    assert labels["dark_period"] == base + ["Baseline sales/day"]
-    assert labels["step_change"] == base + ["Spend multiple"]
-    assert labels["single_channel"] == base + ["Running channel/day"]
+    assert labels["dark_period"] == base + ["Sales with ads off"]
+    assert labels["step_change"] == base + ["Spend change"]
+    assert labels["single_channel"] == base + ["Channel still on/day"]
     assert all(set(t) == {"label", "value", "description"}
                for e, r in by_type.values() for t in viewer.kpi_tiles(e, r, panel))
     _, bare_panel, bare = _analyzed(with_sales=False)
     e, r = bare["natural_holdout"]
-    assert [t["label"] for t in viewer.kpi_tiles(e, r, bare_panel)] == ["Affected spend/day"]
+    assert [t["label"] for t in viewer.kpi_tiles(e, r, bare_panel)] == ["Spend/day"]
 
 
 def test_kpi_tiles_empty_without_readout():
@@ -254,9 +254,9 @@ def test_rough_return_description_says_when_it_was_withheld():
     _, panel, by_type = _analyzed()
     e, r = by_type["dark_period"]
     tiles = {t["label"]: t for t in viewer.kpi_tiles(e, replace(r, readable=True, rough_return=None), panel)}
-    assert "withheld" in tiles["Rough return"]["description"]
+    assert "not shown" in tiles["Return"]["description"]
     tiles = {t["label"]: t for t in viewer.kpi_tiles(e, replace(r, readable=False, rough_return=None), panel)}
-    assert "readable" in tiles["Rough return"]["description"]
+    assert "clear change" in tiles["Return"]["description"]
 
 
 def test_kpi_descriptions_keep_channel_names_as_written():
@@ -270,7 +270,7 @@ def test_table_shows_a_sortable_start_date():
     import datetime
     app = run_app()
     frame = app.dataframe[0].value
-    assert list(frame.columns) == ["Rank", "Market", "Finding", "Channel", "Start", "Days",
+    assert list(frame.columns) == ["Rank", "Market", "Pattern", "Channel", "Start", "Days",
                                    "Priority", "Evidence", "Sales change", "Data quality"]
     assert isinstance(frame["Start"].iloc[0], datetime.date)
 

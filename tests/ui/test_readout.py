@@ -118,7 +118,7 @@ def test_single_market_flags_missing_controls():
     alone = make_panel({"AT": with_window(100, 90, 200, 241)},
                        {k: v for k, v in BASE_SPEND.items() if k[0] == "AT"})
     r = readout(HOLDOUT_AT, alone, [HOLDOUT_AT])
-    assert r.comparison_markets == () and "No comparison markets" in r.note
+    assert r.comparison_markets == () and "No other market" in r.note
     assert r.effect == pytest.approx(-0.10, abs=1e-9)
 
 

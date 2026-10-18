@@ -57,7 +57,7 @@ def test_event_chart_has_sales_row_when_market_has_sales(sample_events, sample_p
     e = sample_events[0]
     fig = event_chart(e, sample_panel, readout(e, sample_panel, sample_events))
     names = {t.name for t in fig.data}
-    assert {"This market", "Comparison markets (average)"} <= names
+    assert {"This market", "Other markets (avg)"} <= names
 
 
 def test_event_chart_without_sales_is_spend_only(sample_events, sample_panel):
@@ -141,8 +141,8 @@ def test_event_chart_draws_the_window_averages(sample_events, sample_panel):
     dark = next(e for e in sample_events if e.event_type == "dark_period")
     r = readout(dark, sample_panel, sample_events)
     texts = [a.text for a in event_chart(dark, sample_panel, r).layout.annotations]
-    assert "Reference avg 100" in texts
+    assert "Before avg 100" in texts
     during = round(r.sales_during / r.sales_reference * 100)
-    assert f"Finding avg {during}" in texts
+    assert f"Period avg {during}" in texts
     bare = [a.text for a in event_chart(dark, sample_panel, None).layout.annotations]
     assert not any("avg" in t for t in bare)

@@ -23,27 +23,27 @@ class TypeInfo:
 TYPES: dict[str, TypeInfo] = {
     "dark_period": TypeInfo(
         "All advertising off",
-        "Baseline: what the business sells with no marketing at all.",
+        "Shows baseline sales with no advertising.",
         "#2a78d6", "#3987e5"),
     "single_channel": TypeInfo(
         "Only one channel on",
-        "That channel's effect without the usual overlap with other channels.",
+        "Shows that channel's effect on its own.",
         "#eb6834", "#d95926"),
     "natural_holdout": TypeInfo(
         "One channel paused",
-        "The paused channel's contribution, much like a holdout test.",
+        "Shows what the paused channel adds.",
         "#1baf7a", "#199e70"),
     "step_change": TypeInfo(
         "Budget step",
-        "How sales respond to a sharp change in one channel's budget.",
+        "Shows how sales react to a budget change.",
         "#eda100", "#c98500"),
     "channel_pulse": TypeInfo(
         "On–off pulsing",
-        "The after-effect: how long sales stay up once spend stops.",
+        "Shows how long ads keep working after they stop.",
         "#e87ba4", "#d55181"),
     "staggered_launch": TypeInfo(
         "Staggered launch",
-        "The channel's effect, using markets that launched at other times as comparison.",
+        "Shows the channel's effect, using other markets as comparison.",
         "#008300", "#008300"),
 }
 

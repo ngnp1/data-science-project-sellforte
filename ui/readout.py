@@ -202,7 +202,7 @@ def readout(event: DetectedEvent, panel: Panel,
                 spend_during=spend_during)
     if not _has_sales(panel, country):
         return Readout(**base, **empty,
-                       note="No sales data for this market, so sales readings are unavailable.")
+                       note="No sales data for this market.")
 
     peers = comparison_markets(event, panel, events, during | reference)
     sales = {c: panel.sales[c].to_numpy(dtype=float) for c in [country, *peers]}
@@ -210,7 +210,7 @@ def readout(event: DetectedEvent, panel: Panel,
     result = _effect(sales, country, peers, d, r)
     if result is None:
         return Readout(**base, **empty,
-                       note="Sales are missing for these weeks, so sales readings are unavailable.")
+                       note="Sales are missing for these weeks.")
     effect, b, used = result
 
     blocked = np.zeros(len(panel.dates), bool)
@@ -231,26 +231,21 @@ def readout(event: DetectedEvent, panel: Panel,
         # A return divides the whole sales change by one channel's spend
         # change, so it is withheld whenever that attribution is plainly wrong.
         if abs(other_change) > OTHER_SPEND_SHARE * abs(spend_change):
-            notes.append("Spend on other channels also changed, so the sales change "
-                         "cannot be put down to this one alone; no rough return.")
+            notes.append("Spend on other channels changed too, so no return is shown.")
         elif sales_difference * spend_change < 0:
-            notes.append("Sales moved the opposite way to spend, so something else "
-                         "probably drove them; no rough return.")
+            notes.append("Sales moved the opposite way to spend, so no return is shown.")
         elif "confounded" in event.tags:
-            notes.append("Another finding overlaps this one, so their effects cannot "
-                         "be separated; no rough return.")
+            notes.append("Another period overlaps this one, so no return is shown.")
         else:
             rough_return = sales_difference / spend_change
     if trimmed:
-        notes.append("The reference window skips days covered by another finding "
-                     "in this market.")
+        notes.append("The comparison window skips another period in this market.")
     if not used:
-        notes.append("No comparison markets without their own findings in these weeks, "
-                     "so the sales change also includes any seasonality or trend.")
+        notes.append("No other market was quiet in these weeks, so seasonality isn't removed.")
     if swing is None:
-        notes.append("Too little history to judge how much sales normally swing.")
+        notes.append("Not enough history to judge normal swings.")
     elif not readable:
-        notes.append("The change is within normal swings in sales, so it cannot be read clearly.")
+        notes.append("The change is within normal swings, so it isn't clear.")
     return Readout(**base, comparison_markets=tuple(used),
                    sales_reference=sales_reference, sales_during=sales_during,
                    effect=effect, swing=swing, readable=readable,

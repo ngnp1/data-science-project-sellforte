@@ -169,13 +169,13 @@ def event_chart(event: DetectedEvent, panel: Panel, rd: Readout | None,
             average = pd.concat([_sales_index(panel.sales[p], reference) for p in peers],
                                 axis=1).mean(axis=1)
             fig.add_trace(go.Scatter(
-                x=panel.dates, y=average, name="Comparison markets (average)",
+                x=panel.dates, y=average, name="Other markets (avg)",
                 mode="lines", line=dict(width=1.2, color=MUTED[dark], dash="dot"),
-                hovertemplate="Comparison markets %{y:.0f}<extra></extra>"), row=1, col=1)
+                hovertemplate="Other markets %{y:.0f}<extra></extra>"), row=1, col=1)
         if rd is not None:
             # The readout's two averages, drawn where they were measured.
             base = sales[reference].mean()
-            for mask, label in ((rd.reference, "Reference"), (rd.during, "Finding")):
+            for mask, label in ((rd.reference, "Before"), (rd.during, "Period")):
                 level = sales[mask].mean() / base * 100
                 for a, b in _runs(mask):
                     fig.add_trace(go.Scatter(
@@ -186,7 +186,7 @@ def event_chart(event: DetectedEvent, panel: Panel, rd: Readout | None,
                                    yanchor="bottom", yshift=3, showarrow=False,
                                    text=f"{label} avg {level:.0f}",
                                    font=dict(size=11, color=ACCENT[dark]), row=1, col=1)
-        fig.update_yaxes(title_text="Sales index (reference = 100)" if rd is not None
+        fig.update_yaxes(title_text="Sales index (before = 100)" if rd is not None
                          else "Sales index (mean = 100)",
                          title_font=dict(size=11, color=MUTED[dark]), row=1, col=1)
 
@@ -270,7 +270,7 @@ def carryover_chart(event: DetectedEvent, panel: Panel, rd: Readout | None,
                              hovertemplate="Day %{x}: %{y:.0f}<extra></extra>"))
     if rd.comparison_markets:
         peers = np.nanmean([curve(p) for p in rd.comparison_markets], axis=0)
-        fig.add_trace(go.Scatter(x=offsets, y=peers, name="Comparison markets (average)",
+        fig.add_trace(go.Scatter(x=offsets, y=peers, name="Other markets (avg)",
                                  mode="lines", line=dict(width=1.2, color=MUTED[dark], dash="dot"),
                                  hovertemplate="Day %{x}: %{y:.0f}<extra></extra>"))
     off_days = float(np.median([(b - a).days + 1 for a, b in event.components]))

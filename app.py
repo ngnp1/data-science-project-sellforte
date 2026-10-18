@@ -20,13 +20,11 @@ from ui.labels import (TYPES, event_id, evidence_band, priority_band, ranked, sc
 from ui.readout import readout
 
 SAMPLE = Path(__file__).parent / "synthetic_data_generator/data"
-ROUGH = "Rough reading, not a causal estimate."
-DEFINITIONS = ("Vs comparison is the sales change the comparison markets did not share; it "
-               "counts as readable when it is at least twice the typical swing at other "
-               "times of year. Rough return is extra sales per extra 1 spent, shown only for "
-               "a readable change where spend moved by at least 10%.")
-CARRYOVER_NOTE = ("Averages over the whole window understate a pause's effect, "
-                  "because advertising keeps working for a while after it stops.")
+ROUGH = "Estimates only. They don't prove what caused the change."
+DEFINITIONS = ("'Vs other markets' is the sales change other markets didn't see. It counts as "
+               "clear when it is at least twice the usual swing. 'Return' is extra sales per extra "
+               "unit of spend, shown only for a clear change where spend moved at least 10%.")
+CARRYOVER_NOTE = "Ads keep working for a while after they stop, so a pause's effect is understated."
 
 
 @st.cache_data(show_spinner=False)
@@ -65,15 +63,14 @@ def is_dark() -> bool:
 
 
 def load_data():
-    source = st.sidebar.radio("Data", ["Included sample", "Upload CSV files"])
-    if source == "Included sample":
-        return (*load_sample(), "Synthetic sample with known events")
+    source = st.sidebar.radio("Data", ["Sample data", "Upload CSV files"])
+    if source == "Sample data":
+        return (*load_sample(), "Sample data")
     media_file = st.sidebar.file_uploader("Media CSV", type="csv")
     sales_file = st.sidebar.file_uploader("Sales CSV (optional)", type="csv")
     if media_file is None:
-        st.info("Upload media data to begin. Media columns: date, country_code, "
-                "advertising_channel, media_investment. Sales columns (optional): "
-                "date, country_code, turnover.")
+        st.info("Upload a media CSV to start (date, country_code, advertising_channel, "
+                "media_investment). A sales CSV is optional (date, country_code, turnover).")
         return None
     try:
         media = pd.read_csv(media_file)
@@ -116,45 +113,45 @@ def subject_label(e, r) -> str:
 
 def comparison_label(r) -> str:
     """Only say "comparison" when comparison markets were actually used."""
-    return "Vs comparison" if r.comparison_markets else "Sales change"
+    return "Vs other markets" if r.comparison_markets else "Sales change"
 
 
 def sales_column(r) -> str:
     if r is None or r.effect is None:
-        return "No sales reading"
+        return "No sales data"
     text = f"{r.effect:+.1%}"
     if r.swing is None:
-        text += " · too little history"
+        text += " · not enough history"
     elif not r.readable:
         text += " · unclear"
     if not r.comparison_markets:
-        text += " · no comparison"
+        text += " · no other markets"
     return text
 
 
 def baseline_help(r) -> str:
-    text = "Average daily sales while no advertising ran."
+    text = "Average daily sales with all ads off."
     if r.readable and r.effect is not None and r.effect < 0:
-        text += f" About {-r.effect:.0%} of sales went with advertising (rough)."
+        text += f" About {-r.effect:.0%} of sales came with advertising (estimate)."
     return text
 
 
 def caveats(e, r) -> list[str]:
     out = []
     if e.validity != "ok":
-        out.append(f"Data quality flagged ({e.validity.replace('_', ' ')}): "
+        out.append(f"Data quality ({e.validity.replace('_', ' ')}): "
                    + "; ".join(e.validity_reasons))
     if e.evidence.get("censored_start"):
-        out.append("Starts on the first day of the data, so it may have begun earlier.")
+        out.append("Starts on the first day of the data, so it may have started earlier.")
     if e.evidence.get("censored_end"):
-        out.append("Runs to the last day of the data, so it may continue.")
+        out.append("Runs to the end of the data, so it may still be going.")
     if "confounded" in e.tags:
-        out.append("Another finding overlaps this one in the same market, "
+        out.append("Overlaps another period in this market, "
                    "so their effects are hard to separate.")
     if r is None:
-        out.append("Not enough data around this period for a sales reading.")
+        out.append("Not enough data around this period to read sales.")
     elif r.sales_reference is not None and not r.comparison_markets:
-        out.append("No comparison markets without their own findings in these weeks, "
+        out.append("No other market was quiet in these weeks, "
                    "so the sales change also includes any seasonality or trend.")
     verification = e.evidence.get("launch_verification")
     if isinstance(verification, dict) and verification.get("status"):
@@ -178,7 +175,7 @@ def table(visible, rank, reads) -> None:
         r = reads[event_id(e)]
         rows.append({
             "Rank": rank[event_id(e)], "Market": e.country_code,
-            "Finding": TYPES[e.event_type].name, "Channel": e.channel or "All channels",
+            "Pattern": TYPES[e.event_type].name, "Channel": e.channel or "All channels",
             "Start": e.start.date(), "End": e.end.date(), "Days": e.n_days,
             "Priority": priority_band(e.informativeness),
             "Evidence": evidence_band(e.detection_confidence),
@@ -208,7 +205,7 @@ def table(visible, rank, reads) -> None:
                                           for e in visible],
            "Rough return per 1 spent": [getattr(reads[event_id(e)], "rough_return", None)
                                         for e in visible]})
-    st.download_button("Download findings", export.to_csv(index=False),
+    st.download_button("Download CSV", export.to_csv(index=False),
                        "findings.csv", "text/csv")
 
 
@@ -221,41 +218,41 @@ def kpi_tiles(e, r, panel) -> list[dict]:
         change = f"{now / before - 1:+.0%} vs reference" if before else "reference was 0"
         return f"{change} ({compact(before)}/day)"
 
-    tiles = [dict(label="Affected spend/day", value=compact(r.spend_during),
+    tiles = [dict(label="Spend/day", value=compact(r.spend_during),
                   description=f"{subject_label(e, r)[:1].upper()}{subject_label(e, r)[1:]}: "
                               f"{versus(r.spend_during, r.spend_reference)}")]
     if r.sales_reference is not None:
-        tiles.append(dict(label="Market sales/day", value=compact(r.sales_during),
+        tiles.append(dict(label="Sales/day", value=compact(r.sales_during),
                           description=versus(r.sales_during, r.sales_reference)))
         if r.swing is None:
-            judged = "too little history to judge"
+            judged = "not enough history to judge"
         else:
-            judged = f"{'readable' if r.readable else 'unclear'} · typical swing ±{r.swing:.1%}"
+            judged = f"{'clear' if r.readable else 'unclear'} (usual swing ±{r.swing:.1%})"
         tiles.append(dict(label=comparison_label(r), value=f"{r.effect:+.1%}",
                           description=judged))
         tiles.append(dict(
-            label="Rough return",
+            label="Return",
             value=f"{r.rough_return:,.2f}" if r.rough_return is not None else "—",
-            description="extra sales per extra 1 spent" if r.rough_return is not None
-            else "withheld for this finding — see the note below" if r.readable
-            else "shown only for a readable change"))
+            description="extra sales per 1 spent" if r.rough_return is not None
+            else "not shown, see the note below" if r.readable
+            else "only shown for a clear change"))
     if e.event_type == "dark_period" and r.baseline is not None:
-        tiles.append(dict(label="Baseline sales/day", value=compact(r.baseline),
+        tiles.append(dict(label="Sales with ads off", value=compact(r.baseline),
                           description=baseline_help(r)))
     elif e.event_type == "step_change" and r.spend_reference > 0:
-        tiles.append(dict(label="Spend multiple",
+        tiles.append(dict(label="Spend change",
                           value=f"{r.spend_during / r.spend_reference:.1f}×",
-                          description="spend during the step ÷ spend before it"))
+                          description="during vs before"))
     elif e.event_type == "single_channel" and e.channel:
         running = panel.series(e.country_code, e.channel)[r.during].mean()
-        tiles.append(dict(label="Running channel/day", value=compact(running),
-                          description=f"{e.channel}, the one channel still running"))
+        tiles.append(dict(label="Channel still on/day", value=compact(running),
+                          description=e.channel))
     return tiles
 
 
 def kpis(e, r, panel) -> None:
     if r is None:
-        ui.alert("No sales reading", "Not enough data around this period for a sales reading.",
+        ui.alert("No sales data", "Not enough data around this period to read sales.",
                  key="no-readout")
         return
     tiles = kpi_tiles(e, r, panel)
@@ -270,12 +267,12 @@ def kpis(e, r, panel) -> None:
 def why_flagged(e) -> None:
     if not (e.evidence.get("confidence_sub_scores") or e.evidence.get("informativeness_drivers")):
         ui.alert("No scores from this detector",
-                 "This detector does not report the scores behind its findings.",
+                 "This detector doesn't report scores.",
                  key="no-scores")
         return
-    st.caption("Rule-based scores from 0 to 1, not probabilities.")
-    groups = (("Evidence that it happened", "confidence_sub_scores", "evidence"),
-              ("How useful it is", "informativeness_drivers", "usefulness"))
+    st.caption("Scores run from 0 to 1. They are rules of thumb, not probabilities.")
+    groups = (("How sure", "confidence_sub_scores", "evidence"),
+              ("How useful", "informativeness_drivers", "usefulness"))
     for col, (heading, field, key) in zip(st.columns(2), groups):
         with col, ui.elements(key=f"scores-{key}") as el:
             with el.card():
@@ -298,7 +295,7 @@ def method_note(r) -> str:
             "after": "the same number of days just after it (the data starts too late for a before window)",
             "on-days": "the pulse's own on-days between pauses"}[r.reference_side]
     peers = ", ".join(r.comparison_markets) or "none"
-    return (f"Reference window: {side}. Comparison markets: {peers}. "
+    return (f"Compared with {side}. Other markets used: {peers}. "
             f"{DEFINITIONS} {CARRYOVER_NOTE}")
 
 
@@ -326,13 +323,13 @@ def inspect(e, r, rank, panel, dark) -> None:
         why_flagged(e)
         if r is not None:
             st.caption(method_note(r))
-        st.markdown(f"**Detector's explanation.** "
+        st.markdown(f"**Detector notes.** "
                     f"{e.explanation or 'This detector gives no explanation.'}")
 
 
 def main():
     st.set_page_config(page_title="Informative periods", layout="wide")
-    st.title("Informative periods in marketing data")
+    st.title("Informative periods")
     loaded = load_data()
     if loaded is None:
         return
@@ -345,16 +342,16 @@ def main():
         detector = detectors[names.index(chosen_name)]
         label = f"{label} · Detector: {detector.name}"
     try:
-        with st.spinner("Finding periods…"):
+        with st.spinner("Scanning…"):
             events, panel, reads = analyze(media, sales, detector.key)
     except (ValueError, KeyError, TypeError) as exc:
-        st.error(f"Please check your input data: {exc}")
+        st.error(f"Couldn't read the data: {exc}")
         return
     dates = panel.dates
     st.caption(f"{label} · {len(panel.countries)} markets · {len(panel.channels)} channels · "
                f"{fmt_day(dates[0])} – {fmt_day(dates[-1])}")
     if not events:
-        st.info("No informative periods were found in this data.")
+        st.info("No periods found.")
         return
 
     order = ranked(events)
@@ -364,12 +361,12 @@ def main():
              if k in detector.event_types and any(e.event_type == k for e in events)]
     chosen = st.sidebar.multiselect("Pattern types", kinds, default=kinds,
                                     format_func=lambda k: TYPES[k].name)
-    hide = st.sidebar.checkbox("Hide findings with data warnings")
+    hide = st.sidebar.checkbox("Hide periods with data warnings")
     visible = [e for e in order if e.country_code in markets and e.event_type in chosen
                and not (hide and e.validity != "ok")]
 
     if not visible:
-        st.info("No findings match these filters.")
+        st.info("Nothing matches these filters.")
         return
     ids = [event_id(e) for e in visible]
     if st.session_state.get("selected") not in ids:
@@ -377,14 +374,14 @@ def main():
     selected = st.session_state["selected"]
     dark = is_dark()
 
-    st.markdown("#### Where the informative periods are")
-    st.caption("Each bar is one finding. Click a bar to inspect it.")
+    st.markdown("#### Timeline")
+    st.caption("One bar per period. Click a bar to see it below.")
     st.plotly_chart(period_map(visible, sorted(markets), selected, (dates[0], dates[-1]), dark),
                     key="map", on_select=pick_from_map, selection_mode="points",
                     width="stretch", config={"displayModeBar": False})
 
-    st.markdown("#### Ranked findings")
-    st.caption("Most informative first. Click a row to inspect it.")
+    st.markdown("#### Periods")
+    st.caption("Most useful first. Click a row to see it below.")
     table(visible, rank, reads)
 
     st.divider()
