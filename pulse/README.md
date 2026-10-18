@@ -419,7 +419,7 @@ period that is the holdout FN. Full dev run: 4 min this time.
 **Definition** (`benchmark/BENCHMARK.md:42`): a channel's spend jumps to a new level and remains
 there. The docs give no magnitude; the evaluator only breaks results down by it
 (`benchmark/eval/README.md:52`). Gradual ramps are an explicit non-event (`ramp_block` in
-`NON_EVENT_TYPES`, `benchmark/eval/model.py:12`). Under our 15 % rule, a drop that stays above 15 %
+`NON_EVENT_TYPES`, `benchmark/eval/model.py:15`). Under our 15 % rule, a drop that stays above 15 %
 of usual (e.g. to 30 %) is a step change; a drop to 15 % or less is "off" and belongs to the
 on/off detectors.
 
