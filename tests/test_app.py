@@ -232,7 +232,7 @@ def test_panel_surfaces_data_warnings():
     assert any(a["title"] == "Data quality" and a["variant"] == "destructive" for a in alerts)
 
 
-def test_why_flagged_draws_one_progress_row_per_score():
+def test_why_flagged_is_two_short_lines():
     app = run_app()
     app.session_state["eid"] = SAMPLE_IDS[1]
     script = f"""
@@ -244,8 +244,34 @@ events, panel, reads = app.analyze(*app.load_sample())
 app.why_flagged(next(e for e in events if e.event_type == "dark_period"))
 """
     flagged = AppTest.from_string(script, default_timeout=60).run()
-    rows = [n for n in element_nodes(flagged) if n["type"] == "progress"]
-    assert len(rows) == 12 and all(0 <= r["props"]["value"] <= 100 for r in rows)
+    assert not flagged.exception
+    assert not [n for n in element_nodes(flagged) if n["type"] == "progress"]
+    texts = [m.value for m in flagged.markdown]
+    assert texts[0] == "**How sure: Strong.** Nothing falls short."
+    assert "**How useful: High.** Nothing falls short." in texts
+    # Each line's Details button lists the criteria by name, ticked, with no scores.
+    assert "✓ How completely spend changed" in texts
+    assert "✓ Usefulness of this pattern" in texts
+    assert not any(any(ch.isdigit() for ch in t) for t in texts if t.startswith(("✓", "✗")))
+
+
+def test_score_checks_mark_what_falls_short():
+    import app as viewer
+    _, _, by_type = _analyzed()
+    pulse, _ = by_type["channel_pulse"]
+    checks = dict(viewer.score_checks(pulse))
+    assert ("Unusual for this channel", False) in checks["How sure"]
+    assert ("Long enough", True) in checks["How sure"]
+
+
+def test_score_summary_names_only_what_falls_short():
+    import app as viewer
+    _, _, by_type = _analyzed()
+    pulse, _ = by_type["channel_pulse"]
+    sure, useful = viewer.score_summary(pulse)
+    assert sure.startswith("**How sure: Moderate.** Falls short on: ")
+    assert "unusual for this channel" in sure
+    assert useful.startswith("**How useful: High.**")
 
 
 def test_rough_return_description_says_when_it_was_withheld():

@@ -264,29 +264,46 @@ def kpis(e, r, panel) -> None:
     st.caption(f"{ROUGH} {r.note}".strip())
 
 
+WEAK_SCORE = 0.5
+SCORE_GROUPS = (("How sure", "confidence_sub_scores"),
+                ("How useful", "informativeness_drivers"))
+
+
+def score_checks(e) -> list[tuple[str, list[tuple[str, bool]]]]:
+    """(group, [(criterion name, met?)]) for the groups the detector reported."""
+    return [(heading, [(name, value >= WEAK_SCORE)
+                       for name, _, value in score_rows(e.evidence[field])])
+            for heading, field in SCORE_GROUPS if e.evidence.get(field)]
+
+
+def score_summary(e) -> list[str]:
+    """One line per score group: the overall band, and only the criteria that
+    fall short."""
+    bands = {"How sure": evidence_band(e.detection_confidence),
+             "How useful": priority_band(e.informativeness)}
+    lines = []
+    for heading, checks in score_checks(e):
+        weak = [name.lower() for name, ok in checks if not ok]
+        tail = f"Falls short on: {', '.join(weak)}." if weak else "Nothing falls short."
+        lines.append(f"**{heading}: {bands[heading]}.** {tail}")
+    return lines
+
+
 def why_flagged(e) -> None:
-    if not (e.evidence.get("confidence_sub_scores") or e.evidence.get("informativeness_drivers")):
+    lines = score_summary(e)
+    if not lines:
         ui.alert("No scores from this detector",
                  "This detector doesn't report scores.",
                  key="no-scores")
         return
-    st.caption("Scores run from 0 to 1. They are rules of thumb, not probabilities.")
-    groups = (("How sure", "confidence_sub_scores", "evidence"),
-              ("How useful", "informativeness_drivers", "usefulness"))
-    for col, (heading, field, key) in zip(st.columns(2), groups):
-        with col, ui.elements(key=f"scores-{key}") as el:
-            with el.card():
-                with el.card_header():
-                    el.heading(heading, level=4)
-                with el.card_content():
-                    with el.stack(gap="md"):
-                        for name, meaning, value in score_rows(e.evidence.get(field, {})):
-                            el.progress(round(value * 100), label=f"{name} · {value:.2f}")
-                            el.text(meaning, variant="muted")
-
-
-
-
+    for line, (heading, checks) in zip(lines, score_checks(e)):
+        text, button = st.columns([6, 1], vertical_alignment="center")
+        text.markdown(line)
+        # A popover, not an expander: this already sits inside Details, and
+        # Streamlit does not nest expanders.
+        with button.popover("Details", width="stretch"):
+            for name, ok in checks:
+                st.markdown(f"{'✓' if ok else '✗'} {name}")
 
 
 def method_note(r) -> str:
