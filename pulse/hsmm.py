@@ -1,4 +1,4 @@
-"""On/off model: two-state hidden semi-Markov model over the per-day 15 % verdicts."""
+# On/off model: two-state hidden semi-Markov model over the per-day 15 % verdicts.
 from __future__ import annotations
 
 import numpy as np

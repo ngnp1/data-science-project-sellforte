@@ -1,4 +1,4 @@
-"""Stress test on synthetic series; run: python -m pulse.stress."""
+# Stress test on synthetic series; run: python -m pulse.stress.
 from __future__ import annotations
 
 import numpy as np
@@ -11,7 +11,7 @@ DAYS = pd.date_range("2024-01-01", periods=365)
 
 def series(pauses, noise=0.2, pause_level=0.0, seed=0, base=None, spike=False, missing=(), extra=(),
            extra_level=None):
-    """Daily spend ~100 x lognormal noise with pauses, spikes, missing days and extra spans."""
+    # Daily spend ~100 x lognormal noise with pauses, spikes, missing days and extra spans.
     rng = np.random.default_rng(seed)
     s = (100.0 if base is None else base) * rng.lognormal(0, noise, len(DAYS))
     for start, n in pauses:
@@ -39,7 +39,7 @@ def step_base():
 
 
 def dropouts(seed=1):
-    """No pulse: random 1-5 day outages only."""
+    # No pulse: random 1-5 day outages only.
     rng = np.random.default_rng(seed)
     return [(int(d), int(rng.integers(1, 6))) for d in rng.choice(np.arange(10, 350), 12, replace=False)]
 
@@ -97,7 +97,7 @@ def overlap(a, b):
 
 
 def score(pauses, **kw):
-    """(trains found, true pauses matched at IoU >= 0.5, max boundary error, probabilities)."""
+    # (trains found, true pauses matched at IoU >= 0.5, max boundary error, probabilities).
     s = series(pauses, **kw)
     present = pd.Series(True, index=DAYS)
     present.iloc[list(kw.get("missing", ()))] = False
@@ -120,7 +120,7 @@ def _cell(pauses, kw):
 
 
 def main():
-    """Per case: pauses matched, max boundary error (days), pulse probability."""
+    # Per case: pauses matched, max boundary error (days), pulse probability.
     rows = ["| case | result |", "|---|---|"]
     for name, pauses, kw in CASES:
         rows.append(f"| {name} | {_cell(pauses, kw)} |")

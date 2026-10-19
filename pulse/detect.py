@@ -1,4 +1,4 @@
-"""Benchmark adapter: media.csv -> channel_pulse events."""
+# Benchmark adapter: media.csv -> channel_pulse events.
 from __future__ import annotations
 
 import pandas as pd
@@ -10,7 +10,7 @@ from pulse.pulse import find_pulse_trains, off_runs, pulse_probability
 
 
 def run_series(s: pd.Series, present: pd.Series | None = None):
-    """[(train, pulse probability, absorbed spike days)] for one channel's daily spend."""
+    # [(train, pulse probability, absorbed spike days)] for one channel's daily spend.
     p = p_off_hsmm(s, present)
     cut = RHO * active_level(s)
     # Keep runs whose median spend (days with data) is <= RHO x usual.
