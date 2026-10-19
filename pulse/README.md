@@ -3,19 +3,18 @@
 Spend-only detector for the six period types. Entry point: `pulse.detect:detect`
 (`python -m benchmark.eval.run_dev --detector pulse.detect:detect --load-data`).
 
-## On/off layer (shared by every detector)
+## On/off model (shared by every detector)
 
 A channel's **usual level** is the median of its spend on days it spent anything. A day is
 **off** when spend is at most 15 % of that level.
 
-- **Layer A** (`onoff.p_off`): turns each day's spend into a probability of being off, using a
-  smooth logistic curve that is exactly 0.5 at the 15 % cutoff.
-- **Layer B** (`onoff.p_off_hmm`): a two-state (on/off) hidden Markov model that treats layer A's
-  verdict as a noisy observation and smooths it with its neighbouring days, so a single odd day
-  or a missing day does not flip the state.
-- **Layer C** (`hsmm.p_off_hsmm`, used by every detector): a hidden semi-Markov model, like B but
-  with explicit priors on how long on and off periods last (pauses typically about two weeks for
-  pulses, about six weeks for the other types). This also absorbs 2–3 day spikes inside a pause.
+1. Each day's spend is turned into a probability of being off (`onoff.p_off`): a smooth
+   logistic curve that is exactly 0.5 at the 15 % cutoff.
+2. A hidden semi-Markov model (`hsmm.p_off_hsmm`) reads those per-day verdicts as noisy
+   evidence and decides each day together with its neighbours, with explicit priors on how long
+   on and off periods last (pauses typically about two weeks for pulses, about six weeks for the
+   other types). One-off spikes of up to 2–3 days inside a pause and missing days don't flip a
+   channel on or off.
 
 An off period only counts if its median spend is still at most 15 % of the usual level.
 

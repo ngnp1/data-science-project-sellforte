@@ -1,4 +1,4 @@
-"""Market-level periods (holdout, single channel, dark, launch) on layer-C P(off)."""
+"""Market-level periods (holdout, single channel, dark, launch) on the on/off model's P(off)."""
 from __future__ import annotations
 
 import numpy as np
@@ -13,7 +13,7 @@ HOLDOUT_SIGMA = 0.8
 
 
 def market_p_off(market: dict) -> dict:
-    """{channel: P(off) per day} for the market's active channels, layer C, holdout prior."""
+    """{channel: P(off) per day} for the market's active channels (on/off model, holdout prior)."""
     return {ch: p_off_hsmm(s, pr, HOLDOUT_MEDIAN, HOLDOUT_SIGMA)
             for ch, (s, pr) in market.items() if np.isfinite(active_level(s))}
 
