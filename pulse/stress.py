@@ -1,10 +1,4 @@
-"""Stress test: synthetic spend series with one known difficulty each.
-
-    python -m pulse.stress
-
-Prints a markdown table: expected vs found pauses and the pulse probability.
-Synthetic only -- never reads the benchmark's test split or spec.
-"""
+"""Stress test on synthetic series; run: python -m pulse.stress."""
 from __future__ import annotations
 
 import numpy as np
@@ -17,11 +11,7 @@ DAYS = pd.date_range("2024-01-01", periods=365)
 
 def series(pauses, noise=0.2, pause_level=0.0, seed=0, base=None, spike=False, missing=(), extra=(),
            extra_level=None):
-    """Daily spend ~100 with lognormal noise; each (start, length) pause set to pause_level.
-
-    spike: days of full spend in the middle of each pause (True = 1 day, or a count).
-    missing: day indices with no data (spend 0 and present False, like detect.py).
-    """
+    """Daily spend ~100 x lognormal noise with pauses, spikes, missing days and extra spans."""
     rng = np.random.default_rng(seed)
     s = (100.0 if base is None else base) * rng.lognormal(0, noise, len(DAYS))
     for start, n in pauses:
