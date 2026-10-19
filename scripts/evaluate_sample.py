@@ -14,6 +14,8 @@ from benchmark.eval.matching import match_events
 from benchmark.eval.metrics import event_level, per_type
 from benchmark.eval.truth import _group_pulses, _to_event
 from detection.pipeline import run_detection
+from step_change_alg.step_change import detect
+
 
 SAMPLE = Path(__file__).resolve().parents[1] / "synthetic_data_generator"
 
@@ -23,17 +25,26 @@ def evaluate_sample():
     truth = _group_pulses("sample", [r for r in raw if r["pattern_type"] == "channel_pulse"])
     truth.extend(_to_event("sample", r, event_type=r["pattern_type"])
                  for r in raw if r["pattern_type"] != "channel_pulse")
-    events = run_detection(pd.read_csv(SAMPLE / "data/media.csv"),
-                           pd.read_csv(SAMPLE / "data/sales.csv"), "sample")
-    pred = [to_event(e) for e in events]
+    media = pd.read_csv(SAMPLE / "data/media.csv")
+    sales = pd.read_csv(SAMPLE / "data/sales.csv")
+
+    pred = detect(media, sales, "sample")
     matched = match_events(truth, pred)
     pulses = [m for m in matched.matches if m.truth.event_type == "channel_pulse"]
+
+    print("PRED:")
+    for e in pred:
+        print(e.sid, e.country_code, e.channel, e.event_type, e.start, e.end)
+
+    print("TRUTH:")
+    for e in truth:
+        print(e.sid, e.country_code, e.channel, e.event_type, e.start, e.end)
+        
     return {
         "dataset": "committed demonstration sample (not held out)",
         "overall": event_level(truth, pred),
         "per_type": per_type(truth, pred),
-        "pulse_components_match": bool(pulses) and all(
-            m.truth.components == m.pred.components for m in pulses),
+        "matched_pairs": len(matched.matches)
     }
 
 
