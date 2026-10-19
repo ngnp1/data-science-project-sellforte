@@ -1,4 +1,4 @@
-"""Market-level periods (holdout, single channel, dark, launch) on the on/off model's P(off)."""
+# Market-level periods (holdout, single channel, dark, launch) on the on/off model's P(off).
 from __future__ import annotations
 
 import numpy as np
@@ -13,13 +13,13 @@ HOLDOUT_SIGMA = 0.8
 
 
 def market_p_off(market: dict) -> dict:
-    """{channel: P(off) per day} for the market's active channels (on/off model, holdout prior)."""
+    # {channel: P(off) per day} for the market's active channels (on/off model, holdout prior).
     return {ch: p_off_hsmm(s, pr, HOLDOUT_MEDIAN, HOLDOUT_SIGMA)
             for ch, (s, pr) in market.items() if np.isfinite(active_level(s))}
 
 
 def find_holdouts(market: dict, pulse_spans: dict, p: dict | None = None) -> list[tuple]:
-    """[(channel, start, end, conf)]: one channel off while most others stay on."""
+    # [(channel, start, end, conf)]: one channel off while most others stay on.
     p = market_p_off(market) if p is None else p
     active = {ch: market[ch] for ch in p}
     out = []
@@ -38,7 +38,7 @@ def find_holdouts(market: dict, pulse_spans: dict, p: dict | None = None) -> lis
 
 
 def find_single_channel(market: dict, p: dict | None = None) -> list[tuple]:
-    """[(survivor, start, end, conf)]: all channels off but one; needs 3+ channels."""
+    # [(survivor, start, end, conf)]: all channels off but one; needs 3+ channels.
     p = market_p_off(market) if p is None else p
     if len(p) < 3:
         return []
@@ -55,7 +55,7 @@ def find_single_channel(market: dict, p: dict | None = None) -> list[tuple]:
 
 
 def _off_frame(market: dict, p: dict) -> pd.DataFrame:
-    """Day x channel: True inside the channel's 15 %-checked off spells."""
+    # Day x channel: True inside the channel's 15 %-checked off spells.
     off = pd.DataFrame({ch: False for ch in p}, index=next(iter(market.values()))[0].index)
     for ch in p:
         s, present = market[ch]
@@ -65,7 +65,7 @@ def _off_frame(market: dict, p: dict) -> pd.DataFrame:
 
 
 def find_dark_periods(market: dict, p: dict | None = None) -> list[tuple]:
-    """[(start, end, conf)]: every channel off; needs 2+ channels."""
+    # [(start, end, conf)]: every channel off; needs 2+ channels.
     p = market_p_off(market) if p is None else p
     if len(market) < 2 or not p:
         return []
@@ -79,7 +79,7 @@ def find_dark_periods(market: dict, p: dict | None = None) -> list[tuple]:
 
 
 def find_staggered_launches(markets: dict, ps: dict) -> list[tuple]:
-    """[(country, channel, start, end, conf)]: channel starts >= MIN_DAYS later than in another market."""
+    # [(country, channel, start, end, conf)]: channel starts >= MIN_DAYS later than in another market.
     delay, spell = {}, {}
     for country, p in ps.items():
         for ch, pc in p.items():

@@ -1,4 +1,4 @@
-"""Step change: Bayesian online changepoint detection on log spend."""
+# Step change: Bayesian online changepoint detection on log spend.
 from __future__ import annotations
 
 import math
@@ -14,7 +14,7 @@ PRIOR_SD = 2.0          # prior spread of a segment's mean log spend (very broad
 
 
 def _changepoints(x: np.ndarray, sigma: float) -> tuple[list[int], np.ndarray]:
-    """BOCPD change indices and score[s] = P(run started within +-3 days of s), read LAG days later."""
+    # BOCPD change indices and score[s] = P(run started within +-3 days of s), read LAG days later.
     n, h, v0 = len(x), 1.0 / LEVEL_DAYS, PRIOR_SD ** 2
     mu0, var = float(np.median(x)), sigma ** 2
     r = np.array([1.0])                       # P(run length = k)
@@ -39,7 +39,7 @@ def _changepoints(x: np.ndarray, sigma: float) -> tuple[list[int], np.ndarray]:
 
 
 def _jumps(x: np.ndarray, a: int, lo: int, hi: int) -> bool:
-    """True if the best-fitting transition width at a is <= MIN_DAYS (a jump, not a ramp)."""
+    # True if the best-fitting transition width at a is <= MIN_DAYS (a jump, not a ramp).
     lo, hi = max(lo, a - 8 * MIN_DAYS), min(hi, a + 8 * MIN_DAYS)
     y, t = x[lo:hi], np.arange(lo, hi)
     sse = {}
@@ -53,7 +53,7 @@ def _jumps(x: np.ndarray, a: int, lo: int, hi: int) -> bool:
 
 
 def find_steps(s: pd.Series, on: pd.Series) -> list[tuple]:
-    """s: daily spend; on: days the channel is on. Returns [(start, end, ratio, confidence)]."""
+    # s: daily spend; on: days the channel is on. Returns [(start, end, ratio, confidence)].
     days = s.index[on.to_numpy(bool)]
     x = np.log(s.loc[days].to_numpy(float))
     if len(x) < 2 * MIN_DAYS:

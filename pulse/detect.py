@@ -1,4 +1,4 @@
-"""Benchmark adapter: media.csv -> events of all six period types."""
+# Benchmark adapter: media.csv -> events of all six period types.
 from __future__ import annotations
 
 import pandas as pd
@@ -13,7 +13,7 @@ from pulse.step import find_steps
 
 
 def run_series(s: pd.Series, present: pd.Series | None = None):
-    """[(train, pulse probability, absorbed spike days)] for one channel's daily spend."""
+    # [(train, pulse probability, absorbed spike days)] for one channel's daily spend.
     p = p_off_hsmm(s, present)
     cut = RHO * active_level(s)
     runs = off_spells(p, s, present, cut)

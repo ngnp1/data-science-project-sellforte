@@ -1,4 +1,4 @@
-"""Pulse trains: a channel switched off repeatedly for pauses of similar length."""
+# Pulse trains: a channel switched off repeatedly for pauses of similar length.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -24,7 +24,7 @@ class PulseTrain:
 
 
 def off_runs(mask: pd.Series, present: pd.Series | None = None) -> list[Run]:
-    """Maximal off runs as (start, end, censored); missing days trimmed off the ends."""
+    # Maximal off runs as (start, end, censored); missing days trimmed off the ends.
     m = mask.to_numpy(bool)
     pr = np.ones(len(m), bool) if present is None else present.astype(bool).to_numpy()
     edges = np.flatnonzero(np.diff(np.r_[0, m.astype(int), 0]))
@@ -45,7 +45,7 @@ def _days(span) -> int:
 
 
 def _similar(lengths) -> bool:
-    """Every length within (1 + LEN_RATIO)x of the group's median, either way."""
+    # Every length within (1 + LEN_RATIO)x of the group's median, either way.
     med = float(np.median(lengths))
     return max(lengths) <= med * (1 + LEN_RATIO) and min(lengths) * (1 + LEN_RATIO) >= med
 
@@ -82,7 +82,7 @@ def find_pulse_trains(runs: list[Run]) -> list[PulseTrain]:
 
 
 def pulse_probability(p_off: pd.Series, components, runs: list[Run]) -> float:
-    """Mean P(off) over the pauses x (1 - CV of pause lengths) x coverage of the window."""
+    # Mean P(off) over the pauses x (1 - CV of pause lengths) x coverage of the window.
     days = pd.concat([p_off.loc[a:b] for a, b in components])
     lengths = np.array([_days(c) for c in components], dtype=float)
     lo, hi = components[0][0], components[-1][1]
@@ -93,6 +93,6 @@ def pulse_probability(p_off: pd.Series, components, runs: list[Run]) -> float:
 
 
 def off_spells(p: pd.Series, s: pd.Series, present: pd.Series | None, cut: float) -> list[Run]:
-    """Off runs whose median spend (days with data) is <= cut."""
+    # Off runs whose median spend (days with data) is <= cut.
     ok = s if present is None else s[present.astype(bool)]
     return [r for r in off_runs(p >= 0.5, present) if ok.loc[r[0]:r[1]].median() <= cut]
