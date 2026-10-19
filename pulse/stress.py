@@ -96,12 +96,12 @@ def overlap(a, b):
     return inter / ((max(a[1], b[1]) - min(a[0], b[0])).days + 1)
 
 
-def score(pauses, layer="A", **kw):
+def score(pauses, **kw):
     """(trains found, true pauses matched at IoU >= 0.5, max boundary error, probabilities)."""
     s = series(pauses, **kw)
     present = pd.Series(True, index=DAYS)
     present.iloc[list(kw.get("missing", ()))] = False
-    found_trains = run_series(s, present, layer)
+    found_trains = run_series(s, present)
     trains, probs = [t for t, _, _ in found_trains], [p for _, p, _ in found_trains]
     truth = [(DAYS[a], DAYS[a + n - 1]) for a, n in pauses]
     found = [c for t in trains for c in t.components]
@@ -111,8 +111,8 @@ def score(pauses, layer="A", **kw):
     return len(trains), len(pairs), err, probs
 
 
-def _cell(pauses, layer, kw):
-    n, matched, err, probs = score(pauses, layer, **kw)
+def _cell(pauses, kw):
+    n, matched, err, probs = score(pauses, **kw)
     if not pauses:
         return f"{n} trains"
     return (f"{matched}/{len(pauses)}, err {'-' if err is None else err}, "
@@ -120,13 +120,12 @@ def _cell(pauses, layer, kw):
 
 
 def main():
-    """Per case and layer: pauses matched, max boundary error (days), pulse probability."""
-    rows = ["| case | layer A | layer B | layer C |", "|---|---|---|---|"]
+    """Per case: pauses matched, max boundary error (days), pulse probability."""
+    rows = ["| case | result |", "|---|---|"]
     for name, pauses, kw in CASES:
-        rows.append(f"| {name} | " + " | ".join(_cell(pauses, layer, kw) for layer in "ABC") + " |")
+        rows.append(f"| {name} | {_cell(pauses, kw)} |")
     for name, pauses, kw in NEGATIVES:
-        rows.append(f"| NO PULSE: {name} | " + " | ".join(
-            f"{score(pauses, layer, **kw)[0]} trains" for layer in "ABC") + " |")
+        rows.append(f"| NO PULSE: {name} | {score(pauses, **kw)[0]} trains |")
     print("\n".join(rows))
 
 

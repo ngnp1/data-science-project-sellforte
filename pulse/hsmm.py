@@ -1,11 +1,12 @@
-"""Layer C: two-state hidden semi-Markov model over layer A's verdicts."""
+"""On/off model: two-state hidden semi-Markov model over the per-day 15 % verdicts."""
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
-from pulse.onoff import HMM_EPS, p_off
+from pulse.onoff import p_off
 
+HMM_EPS = 0.05      # P(a day's verdict is wrong): one odd day must not force a switch
 OFF_MEDIAN = 14.0   # typical pause length in days
 OFF_SIGMA = 0.4     # spread in log-length: ~92 % of off spells between 7 and 30 days
 
