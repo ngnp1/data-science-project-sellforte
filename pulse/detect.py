@@ -1,10 +1,4 @@
-"""Score hook: media.csv in, channel_pulse, natural_holdout, single_channel, dark_period,
-staggered_launch and step_change Events out.
-
-    python -m benchmark.eval.run_dev --detector pulse.detect:detect --load-data     # layer C (default)
-    python -m benchmark.eval.run_dev --detector pulse.detect:detect_b --load-data   # layer B
-    python -m benchmark.eval.run_dev --detector pulse.detect:detect_a --load-data   # layer A
-"""
+"""Benchmark adapter: media.csv -> events of all six period types."""
 from __future__ import annotations
 
 import pandas as pd
@@ -19,12 +13,7 @@ from pulse.step import find_steps
 
 
 def run_series(s: pd.Series, present: pd.Series | None = None, layer: str = "A"):
-    """[(train, pulse probability, absorbed spike days)] for one channel's daily spend.
-
-    Layer A: per-day soft cutoff; a day with no data counts as spend 0 (off).
-    Layer B: sticky HMM; a day with no data is unknown and its neighbours decide.
-    Layer C: semi-Markov model with explicit spell lengths; missing days as in B.
-    """
+    """[(train, pulse probability, absorbed spike days)] for one channel; layer A, B or C."""
     if layer == "A":
         p, present = p_off(s), None
     else:

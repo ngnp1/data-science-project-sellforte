@@ -1,13 +1,4 @@
-"""Layer C: a two-state hidden semi-Markov model (explicit spell lengths).
-
-Like layer B, the evidence for each day is layer A's 15 % verdict, read as wrong
-5 % of the time, so C cannot redefine "off". What C changes is how state
-durations are modelled: instead of B's geometric P(stay) = 0.95, whole spells
-get explicit length priors. Off spells: lognormal, median 14 days, most mass on
-7-30. On spells: flat over any length. The first and last spells are cut off by
-the data edges, so they use survival P(length >= d) instead of P(length = d).
-Fixed priors, not fitted to any benchmark data.
-"""
+"""Layer C: two-state hidden semi-Markov model over layer A's verdicts."""
 from __future__ import annotations
 
 import numpy as np
@@ -38,8 +29,7 @@ def p_off_hsmm(s: pd.Series, present: pd.Series | None = None,
     lp, ls = zip(_log_pmf_and_survival(np.ones(n)),                                          # on
                  _log_pmf_and_survival(np.exp(-0.5 * (np.log(d / off_median) / off_sigma) ** 2) / d))  # off
 
-    # A spell (a, b] of state k: start term, length term (survival if cut by an edge), evidence.
-    # ponytail: O(n^2) spells per series; ~2 s per 2-year series in numpy, fine at benchmark size.
+    # log P(spell (a, b] of state k); ponytail: O(n^2) spells, fine at benchmark size.
     def spell(a, b, k, fwd):
         start = np.where(a == 0, np.log(0.5), fwd[a, 1 - k])
         edge = (a == 0) | (b == n)

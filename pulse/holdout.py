@@ -1,9 +1,4 @@
-"""Natural holdouts: one channel stops while the market's other channels keep running.
-
-Built on layer C (pulse/hsmm.py) and the same 15 % definition of "off", with a broader
-off-spell prior than pulses: holdout tests typically run from a couple of weeks to a few
-months, so the prior is centred on 6 weeks and wide (log-spread 0.8, ~2.5 to 20 weeks).
-"""
+"""Market-level periods (holdout, single channel, dark, launch) on layer-C P(off)."""
 from __future__ import annotations
 
 import numpy as np
@@ -24,10 +19,7 @@ def market_p_off(market: dict) -> dict:
 
 
 def find_holdouts(market: dict, pulse_spans: dict, p: dict | None = None) -> list[tuple]:
-    """market: {channel: (spend, present)}; pulse_spans: {channel: [(start, end), ...]}.
-
-    Returns [(channel, start, end, confidence)].
-    """
+    """[(channel, start, end, conf)]: one channel off while most others stay on."""
     p = market_p_off(market) if p is None else p
     active = {ch: market[ch] for ch in p}
     out = []
@@ -46,12 +38,7 @@ def find_holdouts(market: dict, pulse_spans: dict, p: dict | None = None) -> lis
 
 
 def find_single_channel(market: dict, p: dict | None = None) -> list[tuple]:
-    """All channels except one stop: runs of >= MIN_DAYS where exactly one active channel is on.
-
-    Needs 3+ active channels: with 2, "all but one stop" and "one stops while the other runs"
-    are the same spend pattern, and it is reported as a natural holdout (see README).
-    Returns [(surviving channel, start, end, confidence)].
-    """
+    """[(survivor, start, end, conf)]: all channels off but one; needs 3+ channels."""
     p = market_p_off(market) if p is None else p
     if len(p) < 3:
         return []
@@ -78,9 +65,7 @@ def _off_frame(market: dict, p: dict) -> pd.DataFrame:
 
 
 def find_dark_periods(market: dict, p: dict | None = None) -> list[tuple]:
-    """All channels in a market stop at the same time: runs of >= MIN_DAYS with every active
-    channel off (a channel that never spends is already stopped). Needs 2+ channels in the
-    market: with one, it is just that channel's pause. Returns [(start, end, confidence)]."""
+    """[(start, end, conf)]: every channel off; needs 2+ channels."""
     p = market_p_off(market) if p is None else p
     if len(market) < 2 or not p:
         return []
@@ -94,13 +79,7 @@ def find_dark_periods(market: dict, p: dict | None = None) -> list[tuple]:
 
 
 def find_staggered_launches(markets: dict, ps: dict) -> list[tuple]:
-    """A channel starts running later in some markets than in others.
-
-    markets: {country: {channel: (spend, present)}}; ps: {country: market P(off)}.
-    A market's launch delay is its off spell starting on the first day (>= MIN_DAYS, 15 %
-    checked). It is a staggered launch if another market ran the same channel at least
-    MIN_DAYS earlier. Returns [(country, channel, start, end, confidence)].
-    """
+    """[(country, channel, start, end, conf)]: channel starts >= MIN_DAYS later than in another market."""
     delay, spell = {}, {}
     for country, p in ps.items():
         for ch, pc in p.items():

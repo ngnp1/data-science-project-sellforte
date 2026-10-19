@@ -24,12 +24,7 @@ class PulseTrain:
 
 
 def off_runs(mask: pd.Series, present: pd.Series | None = None) -> list[Run]:
-    """Maximal runs of off days. A run touching either end of the data is censored:
-    its true start (or end) is not visible, so its length is a lower bound.
-
-    With `present`, missing days are trimmed off each run's ends: a pause cannot be
-    shown to start or end on a day we have no data for.
-    """
+    """Maximal off runs as (start, end, censored); missing days trimmed off the ends."""
     m = mask.to_numpy(bool)
     pr = np.ones(len(m), bool) if present is None else present.astype(bool).to_numpy()
     edges = np.flatnonzero(np.diff(np.r_[0, m.astype(int), 0]))
@@ -63,10 +58,7 @@ def find_pulse_trains(runs: list[Run]) -> list[PulseTrain]:
     runs = [r for r in runs if _days(r) >= MIN_DAYS]
     inner = sorted((r for r in runs if not r[2]), key=lambda r: (_days(r), r[0]))
     edge = [r for r in runs if r[2]]
-    # Length groups: from the shortest remaining pause, take the longest stretch of
-    # the sorted lengths that passes the median rule as a whole. Checking the whole
-    # group, not pause by pause, keeps alternating 7/11-day pauses together.
-    # ponytail: O(n^2) in pauses per series; fine at a few dozen.
+    # Longest sorted stretch passing the median rule as a whole; ponytail: O(n^2) in pauses.
     groups, i = [], 0
     while i < len(inner):
         j = max(k for k in range(i + 1, len(inner) + 1) if _similar([_days(r) for r in inner[i:k]]))
@@ -80,8 +72,7 @@ def find_pulse_trains(runs: list[Run]) -> list[PulseTrain]:
                 chunks.append([])
             chunks[-1].append(run)
         for c in (c for c in chunks if len(c) >= MIN_RUNS):
-            # A censored pause at the data edge can extend a train but never make one.
-            # Its length is only a lower bound, so only "not too long" is checked.
+            # Censored edge pause: may extend a train (length is a lower bound), never start one.
             cap = float(np.median([_days(r) for r in c])) * (1 + LEN_RATIO)
             for e in edge:
                 if _days(e) <= cap and (_close(e, c[0]) if e[1] < c[0][0] else _close(c[-1], e)):
@@ -91,13 +82,7 @@ def find_pulse_trains(runs: list[Run]) -> list[PulseTrain]:
 
 
 def pulse_probability(p_off: pd.Series, components, runs: list[Run]) -> float:
-    """Mean P(off) over the train's off-days x how alike its pauses are x coverage.
-
-    Coverage = the train's pause days / all off-run days (runs >= MIN_DAYS) inside its
-    span, so a train that left a long pause out of its own window scores lower.
-    ponytail: 1 - CV of pause lengths is a crude regularity term; swap in a
-    proper spacing model if irregular-but-real flighting gets under-scored.
-    """
+    """Mean P(off) over the pauses x (1 - CV of pause lengths) x coverage of the window."""
     days = pd.concat([p_off.loc[a:b] for a, b in components])
     lengths = np.array([_days(c) for c in components], dtype=float)
     lo, hi = components[0][0], components[-1][1]
@@ -108,8 +93,6 @@ def pulse_probability(p_off: pd.Series, components, runs: list[Run]) -> float:
 
 
 def off_spells(p: pd.Series, s: pd.Series, present: pd.Series | None, cut: float) -> list[Run]:
-    """Off runs from a layer's P(off), kept only if they meet the definition: typical
-    spend (median over days with data) <= cut. Smoothing may absorb odd days, never
-    redefine "off"."""
+    """Off runs whose median spend (days with data) is <= cut."""
     ok = s if present is None else s[present.astype(bool)]
     return [r for r in off_runs(p >= 0.5, present) if ok.loc[r[0]:r[1]].median() <= cut]

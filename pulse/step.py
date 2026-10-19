@@ -1,16 +1,4 @@
-"""Step change: a channel's spend jumps to a new level and stays there (BENCHMARK.md:42).
-
-Bayesian online changepoint detection (Adams & MacKay 2007) on x = log spend (2x up and 0.5x
-down are the same size), on days the channel is on by the 15 % rule; off days belong to the
-on/off detectors and are skipped. Gaussian segments with unknown mean, noise from the series
-itself (MAD of day-to-day differences), constant hazard 1 / LEVEL_DAYS. A change is read from
-the run-length posterior one week after it (P(run started there)), then placed at the best
-mean-shift split nearby. A step is a jump of at least STEP_MIN_RATIO, abrupt (the best-fitting
-transition takes at most a week, so gradual ramps don't count), held
-7+ days, and
-not a return to the level before an excursion; it lasts
-until spend returns within that ratio of the old level, or to the end of the data.
-"""
+"""Step change: Bayesian online changepoint detection on log spend."""
 from __future__ import annotations
 
 import math
@@ -26,8 +14,7 @@ PRIOR_SD = 2.0          # prior spread of a segment's mean log spend (very broad
 
 
 def _changepoints(x: np.ndarray, sigma: float) -> tuple[list[int], np.ndarray]:
-    """BOCPD; returns change indices and score[s] = P(a new run started within +-3 days of s),
-    read from the run-length posterior LAG days later."""
+    """BOCPD change indices and score[s] = P(run started within +-3 days of s), read LAG days later."""
     n, h, v0 = len(x), 1.0 / LEVEL_DAYS, PRIOR_SD ** 2
     mu0, var = float(np.median(x)), sigma ** 2
     r = np.array([1.0])                       # P(run length = k)
@@ -52,9 +39,7 @@ def _changepoints(x: np.ndarray, sigma: float) -> tuple[list[int], np.ndarray]:
 
 
 def _jumps(x: np.ndarray, a: int, lo: int, hi: int) -> bool:
-    """A step jumps, a ramp drifts: fit the change near a as a linear transition of width w between
-    two flat levels (over the neighbouring stretches, up to 8 weeks each side; the transition may
-    sit anywhere that contains a) and keep the best w; a step is a change completed within a week."""
+    """True if the best-fitting transition width at a is <= MIN_DAYS (a jump, not a ramp)."""
     lo, hi = max(lo, a - 8 * MIN_DAYS), min(hi, a + 8 * MIN_DAYS)
     y, t = x[lo:hi], np.arange(lo, hi)
     sse = {}
@@ -80,8 +65,7 @@ def find_steps(s: pd.Series, on: pd.Series) -> list[tuple]:
     out, i, big = [], 1, math.log(STEP_MIN_RATIO)
     while i < len(level):
         a = bounds[i]
-        # A return to the level before an excursion is not a new level: a real step excursion
-        # would already have been reported with its return, so this excursion was not a step.
+        # A return to the pre-excursion level is not a new level.
         back = i >= 2 and abs(level[i] - level[i - 2]) < big
         if abs(level[i] - level[i - 1]) < big or back or not _jumps(x, a, bounds[i - 1], bounds[i + 1]):
             i += 1

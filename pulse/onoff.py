@@ -1,8 +1,4 @@
-"""The on/off layer: each day's probability that a channel was off.
-
-A soft cutoff around a hard threshold: spend at or below RHO x the channel's
-usual level counts as off. At p = ONOFF_CUT it is exactly that hard cutoff.
-"""
+"""Layers A and B: per-day P(off) from the 15 % cutoff, and its sticky-HMM smoothing."""
 from __future__ import annotations
 
 import numpy as np
@@ -36,19 +32,13 @@ def off_mask(s: pd.Series, present: pd.Series | None = None) -> pd.Series:
     return p_off(s, present) >= ONOFF_CUT
 
 
-# --- Layer B: a sticky two-state HMM over layer A's verdicts ---------------
-# Layer B does not redefine "off": its evidence for each day is layer A's P(off)
-# (spend <= RHO x usual), read as a noisy observation. It only decides each day
-# together with its neighbours. Fixed priors, not fitted to any benchmark data.
+# Layer B: sticky HMM, evidence = layer A's verdict (fixed priors).
 HMM_STAY = 0.95       # P(state persists to the next day): on/off spells usually last a week+
 HMM_EPS = 0.05        # P(a day's layer-A verdict is wrong): one odd day must not force a switch
 
 
 def p_off_hmm(s: pd.Series, present: pd.Series | None = None) -> pd.Series:
-    """P(off) per day from forward-backward on a sticky on/off HMM.
-
-    Missing days (present False) are uninformative: their neighbours decide.
-    """
+    """Layer B: forward-backward posterior P(off); missing days are uninformative."""
     q = p_off(s).to_numpy()                       # layer A, without the missing-day rule
     off = (1 - HMM_EPS) * q + HMM_EPS * (1 - q)   # P(day's evidence | off)
     on = HMM_EPS * q + (1 - HMM_EPS) * (1 - q)    # P(day's evidence | on)
