@@ -6,13 +6,15 @@ from sklearn.cluster import KMeans
 from sklearn import metrics
 
 spend_channels = [
-    "Facebook_spend",
-    "Google Discovery_spend",
-    "Google Search_spend",
-    "Instagram_spend",
-    "Radio_spend",
-    "TV_spend"
+    "Facebook",
+    "Google Discovery",
+    "Google Search",
+    "Instagram",
+    "Radio",
+    "TV"
 ]
+
+keys = ["country_code", "date"]
 
 def detect(media_df, sales_df, sid: str) -> list[Event]:
     DEBUG = False
@@ -20,28 +22,16 @@ def detect(media_df, sales_df, sid: str) -> list[Event]:
     ZERO_THRESHOLD = 50  # Below this threshold spending is considered to be paused and not a step change
     events = []
 
-    keys = ["country_code", "date"]
-
     spend = (
         media_df.groupby(keys + ["advertising_channel"])["media_investment"]
         .sum(min_count=1)
         .unstack()
-        .add_suffix("_spend")
     )
 
     sales = sales_df.groupby(keys)["turnover"].sum(min_count=1).rename("total_turnover")
 
     df = spend.join(sales, how="outer").sort_index().reset_index()
     df.columns.name = None
-
-    spend_channels = [
-        "Facebook_spend",
-        "Google Discovery_spend",
-        "Google Search_spend",
-        "Instagram_spend",
-        "Radio_spend",
-        "TV_spend"
-    ]
 
     df["date"] = pd.to_datetime(df["date"])
 
