@@ -37,6 +37,13 @@ To include sales, load its CSV and pass it as `run_detection(media, sales, sid="
 | Pulse | Group nearby pauses of similar length. The rule does not require perfectly regular spacing. Each off-window is stored separately. |
 | Late launch | Find an initial inactive period followed by activity, then compare it with other markets. |
 
+Late launches require 14 consecutive observed active days and at least 14 days
+of separation from the earliest qualifying market. A separate readiness screen
+checks 8 weeks before and 4 weeks after launch for data coverage, untreated
+comparison markets, competing changes, and comparable sales. See the
+[staggered launch implementation guide](compose/staggered_launch/README.md) for the rules,
+assessment output, and limitations. Readiness does not estimate sales effects.
+
 The minimum reportable duration is seven days. Exact thresholds live in [params.py](params.py); the pattern rules live in [primitives/](primitives/).
 
 ## Read an event

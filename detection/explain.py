@@ -430,6 +430,12 @@ def explain(event: DetectedEvent, panel: Panel) -> str:
         parts.append(isolation)
 
     if event.event_type == "staggered_launch":
+        verification = event.evidence.get("launch_verification")
+        if verification:
+            reasons = ", ".join(verification["reason_codes"]) or "all screening checks passed"
+            parts.append(f"Launch analysis readiness: {verification['status']} ({reasons}). "
+                         "This screening does not establish causal comparability or estimate sales effects; "
+                         "the generic informativeness score is separate.")
         onset = event.evidence.get("onset")
         earliest = event.evidence.get("earliest_market_onset")
         n_markets = event.evidence.get("n_markets")

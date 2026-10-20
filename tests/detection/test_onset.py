@@ -56,3 +56,28 @@ def test_a_run_at_the_series_end_is_a_discontinuation():
 
 def test_a_channel_running_to_the_end_has_no_discontinuation():
     assert find_discontinuation(s([100.0] * 200)) is None
+
+
+def test_brief_activity_is_not_a_confirmed_launch():
+    for active_days in (1, 13):
+        assert find_onset(s([0] * 30 + [100] * active_days + [0] * 60)) is None
+    assert find_onset(s([0] * 30 + [100] * 14)) is not None
+
+
+def test_missing_activation_rows_do_not_confirm_a_launch():
+    spend = s([0] * 30 + [100] * 30)
+    present = pd.Series(True, index=spend.index)
+    present.iloc[35] = False
+    assert find_onset(spend, present) is None
+
+
+def test_missing_history_is_not_observed_inactivity():
+    spend = s([0] * 30 + [100] * 30)
+    present = pd.Series(True, index=spend.index)
+    present.iloc[:25] = False
+    assert find_onset(spend, present) is None
+    present.iloc[24] = True
+    present.iloc[23] = True
+    onset = find_onset(spend, present)
+    assert onset.observed_inactive_days == 7
+    assert onset.active_confirmation_days == 14
