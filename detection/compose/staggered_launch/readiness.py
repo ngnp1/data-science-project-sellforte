@@ -9,9 +9,8 @@ import pandas as pd
 from detection import params
 from detection.io.normalize import active_level
 from detection.io.panel import Panel
-from detection.model import DetectedEvent
+from detection.model import DetectedEvent, subject_channels
 from detection.primitives.zero_runs import off_mask
-from detection.score import subject_channels
 
 
 def _onset(event: DetectedEvent) -> pd.Timestamp:

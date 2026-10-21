@@ -1,9 +1,9 @@
 import pandas as pd
 import pytest
 
-from detection.explain import explain
+from detection.scoring.explain import explain
 from detection.model import DetectedEvent
-from tests.detection.test_score import build, event
+from tests.detection.scoring.test_score import build, event
 
 
 def test_the_explanation_names_the_channel_market_dates_and_length():

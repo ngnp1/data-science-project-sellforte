@@ -36,7 +36,7 @@ Then add `"detectors.my_detector"` to `MODULES` in [registry.py](registry.py). I
 - **Required:** market, event type, inclusive start and end dates, the channel (`None` for a dark period), and the off-windows (`components`) for a pulse.
 - **Optional:** scores, explanation, evidence. When they are missing, the app shows "Unscored" or says no explanation was given.
 - `validity` defaults to `"ok"`. A detector that does not check data quality therefore has its findings shown as OK.
-- To get the same scores, data-quality checks and explanations as ours, pass your findings through `detection.scoring.score_findings(findings, build_panel(media, sales))`. The Team detector does this.
+- To get the same scores, data-quality checks and explanations as ours, pass your findings through `detection.scoring.score_findings(findings, build_panel(media, sales))` ([how scoring works](../detection/scoring/README.md)). The Team detector does this.
 
 Once two or more detectors are registered, a **Detector** picker appears in the app's sidebar. It starts on Team.
 

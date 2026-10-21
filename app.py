@@ -13,9 +13,10 @@ import streamlit as st
 import streamlit_shadcn_ui as ui
 
 from detection.io.panel import build_panel
+from detection.scoring import ranked
 from detectors import registry
 from ui.charts import carryover_chart, event_chart, period_map
-from ui.labels import (TYPES, event_id, evidence_band, priority_band, ranked, score_rows,
+from ui.labels import (TYPES, event_id, evidence_band, priority_band, score_rows,
                        title)
 from ui.readout import readout
 

@@ -9,8 +9,8 @@ Must work on an UNSCORED event (detection_confidence and informativeness both
 None): this is also the debugging surface reached for when scoring itself is
 what went wrong, so it cannot depend on scoring having already run.
 
-Uses `subject_channels`, the single public helper detection/score.py and
-detection/validity.py both already share, rather than reading `event.channel`
+Uses `subject_channels`, the single public helper detection/scoring/score.py and
+detection/scoring/validity.py both already share, rather than reading `event.channel`
 directly wherever the claim is about "the channel(s) that stopped" -- for a
 single_channel event `channel` names the channel still RUNNING, and reading it
 directly here would repeat the inversion that has already produced real
@@ -24,7 +24,7 @@ import pandas as pd
 from detection.io.panel import Panel
 from detection.model import DetectedEvent
 from detection.primitives.zero_runs import OffRun, find_off_runs, off_mask
-from detection.score import subject_channels
+from detection.scoring.score import subject_channels
 
 _TYPE_PHRASE = {
     "dark_period": "every channel in the market stopped together",
@@ -282,7 +282,7 @@ def _isolation_sentence(panel: Panel, event: DetectedEvent,
     stopped, which its own base sentence already states -- so a "ran
     normally" sentence would contradict it rather than support it.
     staggered_launch and step_change make no claim about neighbouring
-    channels at all (see detection/score.py's own note on step_change).
+    channels at all (see detection/scoring/score.py's own note on step_change).
     """
     if event.event_type not in {"natural_holdout", "channel_pulse"}:
         return None

@@ -81,11 +81,11 @@ def test_sales_do_not_participate_in_detection():
     detector that silently returned [] without sales would also satisfy.
 
     Full-object equality is deliberately NOT used here (Plan 4 onward): the
-    informativeness score's sales_snr driver (detection/score.py) is by
+    informativeness score's sales_snr driver (detection/scoring/score.py) is by
     design the one place sales legitimately participates, in SCORING an
     already-found event, not in finding it. Comparing on identity plus
     validity plus detection_confidence -- none of which read sales, per
-    detection/score.py and detection/validity.py -- keeps this test pinned
+    detection/scoring/score.py and detection/scoring/validity.py -- keeps this test pinned
     to the actual invariant instead of a coincidence that stopped holding the
     moment scoring existed.
     """

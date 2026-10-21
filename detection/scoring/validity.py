@@ -26,7 +26,7 @@ import pandas as pd
 from detection.io.panel import Panel
 from detection.model import DetectedEvent
 from detection.primitives.zero_runs import find_off_runs, off_mask
-from detection.score import subject_channels
+from detection.scoring.score import subject_channels
 
 OK = "ok"
 SUSPECT_DATA_GAP = "suspect_data_gap"
@@ -149,7 +149,7 @@ def _tracking_loss_reason(channel: str, spent: pd.Series, present: pd.Series,
     level, not at zero, so a near-zero event -- spend cut to a trickle and
     held there -- is "off" while still buying. Saying "spend is zero" about
     a window that spent five figures is a false statement in output an
-    analyst is meant to trust, and it is the same defect detection/explain.py
+    analyst is meant to trust, and it is the same defect detection/scoring/explain.py
     fixed by replacing "stopped" with "cut to a trickle" for a near-zero run.
     The wording here is taken from the same source of truth those sentences
     use -- `OffRun.kind` on the runs covering the claimed days -- so the two

@@ -1,4 +1,4 @@
-"""Plain-language names, copy, colours and ranking for detected events.
+"""Plain-language names, copy and colours for detected events.
 
 The viewer's reader may not be a statistician, so every detector key that
 reaches the screen goes through here first. Colours are the dataviz reference
@@ -124,11 +124,3 @@ def title(e: DetectedEvent) -> str:
     }.get(e.event_type, e.event_type)
     return f"{e.country_code} · {what}"
 
-
-def ranked(events: list[DetectedEvent]) -> list[DetectedEvent]:
-    """Most informative first; confidence breaks ties; unscored events last."""
-    def key(e: DetectedEvent):
-        info, conf = e.informativeness, e.detection_confidence
-        return (info is None, -(info or 0.0), conf is None, -(conf or 0.0),
-                str(e.country_code), e.start)
-    return sorted(events, key=key)

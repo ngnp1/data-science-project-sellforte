@@ -10,7 +10,7 @@ composition layer writes evidence for human consumption and its contents vary by
 event type; recomputing here keeps the six sub-scores defined for every event.
 
 `subject_channels` is PUBLIC (no leading underscore) because it is shared across
-a module boundary: detection/validity.py and detection/explain.py both need the
+a module boundary: detection/scoring/validity.py and detection/scoring/explain.py both need the
 same "which channels does this event actually make a claim about" logic, and it
 must not be duplicated there. It encodes an inversion that has already produced
 a real defect in this codebase: a `single_channel` event's `channel` field names

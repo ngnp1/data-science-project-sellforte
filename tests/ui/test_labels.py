@@ -1,6 +1,7 @@
 from detection.model import EVENT_TYPES
+from detection.scoring import ranked
 from ui.labels import (SCORE_NAMES, TYPES, event_id, evidence_band,
-                       priority_band, ranked, score_rows, short_label, title)
+                       priority_band, score_rows, short_label, title)
 
 
 def test_every_event_type_has_copy_and_colours():

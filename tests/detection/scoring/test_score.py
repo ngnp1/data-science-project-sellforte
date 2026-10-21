@@ -5,7 +5,7 @@ import pytest
 from detection import params
 from detection.io.panel import build_panel
 from detection.model import DetectedEvent
-from detection.score import confidence, informativeness, sub_scores
+from detection.scoring.score import confidence, informativeness, sub_scores
 
 COLS = ["date", "ad_platform", "advertising_channel", "campaign_name",
         "campaign_id", "media_investment", "clicks", "impressions",
@@ -307,10 +307,10 @@ def test_an_event_on_a_channel_with_no_off_run_still_scores():
 
 def test_subject_channels_is_public_and_shared_across_modules():
     """The ruling on Plan 4 tasks 1-2: this helper must be a PUBLIC name in
-    detection/score.py so detection/validity.py and detection/explain.py can
+    detection/scoring/score.py so detection/scoring/validity.py and detection/scoring/explain.py can
     import it across the module boundary without duplicating the logic. A
     leading underscore would declare the opposite of that intent."""
-    from detection.score import subject_channels
+    from detection.scoring.score import subject_channels
 
     p = build({"TV": [100.0] * 60 + [0.0] * 30 + [100.0] * 60,
                "Radio": [50.0] * 150})
@@ -527,7 +527,7 @@ def test_consistency_carries_more_weight_for_a_dark_period_than_a_step_change(mo
     sub-score except consistency, so the only thing that can move either
     confidence() call below is CONFIDENCE_WEIGHTS itself -- not real panel
     data, and not a reimplementation of confidence()'s own arithmetic."""
-    import detection.score as score_module
+    import detection.scoring.score as score_module
 
     base = {"magnitude_evidence": 0.5, "duration_evidence": 0.5,
             "distinctiveness": 0.5, "edge_sharpness": 0.5,

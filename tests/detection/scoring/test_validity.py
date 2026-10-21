@@ -2,8 +2,8 @@ import pandas as pd
 import pytest
 
 from detection import params
-from detection.validity import assess
-from tests.detection.test_score import build, event
+from detection.scoring.validity import assess
+from tests.detection.scoring.test_score import build, event
 
 
 def test_a_clean_event_is_ok_with_no_reasons():
@@ -27,7 +27,7 @@ def test_missing_rows_are_a_data_gap_not_a_holdout():
         rows.append([d, "P", "TV", "c", 1, 100.0, 1.0, 100.0, 0, 0.0, "DE"])
         rows.append([d, "P", "Radio", "c", 1, 50.0, 1.0, 50.0, 0, 0.0, "DE"])
     from detection.io.panel import build_panel
-    from tests.detection.test_score import COLS
+    from tests.detection.scoring.test_score import COLS
     p = build_panel(pd.DataFrame(rows, columns=COLS), sid="dev_test")
     verdict, reasons = assess(event(p, "TV", 60, 89), p)
     assert verdict == "suspect_data_gap"
@@ -144,7 +144,7 @@ def test_a_near_zero_event_is_never_told_its_spend_was_zero():
     On the development split that was dev_012 SE/Radio spending 36,466 across
     its 90 "off" days, dev_034 DE/TV 425 and dev_032 FR/OOH 135, with
     impressions simply proportional to the residual spend. The wording follows
-    `OffRun.kind` here for the same reason detection/explain.py's does: a
+    `OffRun.kind` here for the same reason detection/scoring/explain.py's does: a
     sentence that contradicts the numbers printed beside it is worse than no
     sentence.
     """
@@ -183,7 +183,7 @@ def test_a_step_change_with_missing_rows_is_flagged():
         rows.append([d, "P", "TV", "c", 1, spend, 1.0, spend, 0, 0.0, "DE"])
         rows.append([d, "P", "Radio", "c", 1, 50.0, 1.0, 50.0, 0, 0.0, "DE"])
     from detection.io.panel import build_panel
-    from tests.detection.test_score import COLS
+    from tests.detection.scoring.test_score import COLS
     p = build_panel(pd.DataFrame(rows, columns=COLS), sid="dev_test")
 
     verdict, reasons = assess(event(p, "TV", 75, 149, event_type="step_change",

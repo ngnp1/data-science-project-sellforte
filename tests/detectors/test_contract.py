@@ -40,5 +40,5 @@ def test_the_rule_based_detector_is_our_library(frames):
 
 def test_subject_channels_lives_with_the_contract():
     import detection.model as model
-    import detection.score as score
+    import detection.scoring.score as score
     assert model.subject_channels is score.subject_channels

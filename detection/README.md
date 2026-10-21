@@ -57,6 +57,6 @@ Scores are heuristics, not probabilities, and not estimates of what advertising 
 | [io/](io/) | Prepares and rescales the data. |
 | [primitives/](primitives/) | Finds individual patterns. |
 | [compose/](compose/) | Labels findings and compares markets. |
-| [score.py](score.py), [validity.py](validity.py), [explain.py](explain.py) | Scores, data checks, explanations. |
+| [scoring/](scoring/README.md) | Scores, data checks, explanations and ranking. Works for any detector. |
 
 `detection/` must never import the benchmark or its answers. A test checks this.

@@ -9,7 +9,7 @@ verdict, launch readiness checks and a plain-language explanation.
 Our pipeline calls it after detection, and so can any other detector
 (detectors/team.py does), so every detector's findings are ranked, checked
 and explained the same way. The rules themselves live in score.py,
-validity.py, explain.py and compose/.
+validity.py and explain.py beside this file, and in compose/.
 """
 from __future__ import annotations
 
@@ -17,11 +17,11 @@ from dataclasses import replace
 
 from detection.compose.cross_market import annotate
 from detection.compose.staggered_launch.readiness import verify_staggered_launches
-from detection.explain import explain
+from detection.scoring.explain import explain
 from detection.io.panel import Panel
 from detection.model import DetectedEvent
-from detection.score import confidence, informativeness
-from detection.validity import assess
+from detection.scoring.score import confidence, informativeness
+from detection.scoring.validity import assess
 
 
 def score_findings(events: list[DetectedEvent], panel: Panel) -> list[DetectedEvent]:
