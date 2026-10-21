@@ -70,8 +70,8 @@ SCORE_NAMES: dict[str, tuple[str, str]] = {
                     "Other changes in the same market at the same time blur the reading."),
     "control_availability": ("Comparison available",
                              "Other markets or channels kept running and can serve as a comparison."),
-    "sales_snr": ("Sales steady enough to read",
-                  "How small normal day-to-day sales noise is in this market."),
+    "sales_snr": ("Sales moved",
+                  "How far sales moved from the 8 weeks before, against their usual ups and downs."),
     "type_prior": ("Usefulness of this pattern",
                    "Some patterns, such as all advertising off, are more informative by nature."),
 }
