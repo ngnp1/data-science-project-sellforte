@@ -12,13 +12,25 @@ from dataclasses import dataclass
 import pandas as pd
 
 from detection import params
-from detection.primitives.zero_runs import OffRun, find_off_runs
+from detection.primitives.zero_runs import OffRun, find_off_runs, off_mask
 
 
 @dataclass(frozen=True)
 class Onset:
     first_active: pd.Timestamp
     dormant_days: int
+    observed_inactive_days: int
+    active_confirmation_days: int
+
+
+def sustained_activity(s: pd.Series, present: pd.Series | None = None) -> bool:
+    """Confirm activity on every observed day of the opening confirmation window."""
+    window = s.iloc[:params.LAUNCH_ACTIVE_DAYS]
+    known = present.iloc[:params.LAUNCH_ACTIVE_DAYS] if present is not None else None
+    # Use the full series' level, not a baseline estimated from a brief spike.
+    active = ~off_mask(s, present).iloc[:params.LAUNCH_ACTIVE_DAYS]
+    return bool(len(window) == params.LAUNCH_ACTIVE_DAYS and active.all()
+                and (known is None or known.all()))
 
 
 def find_onset(s: pd.Series, present: pd.Series | None = None) -> Onset | None:
@@ -31,7 +43,14 @@ def find_onset(s: pd.Series, present: pd.Series | None = None) -> Onset | None:
         # same rule the composer does -- no gate that no input can trip.
         if r.touches_start and r.n_days >= params.MIN_DAYS:
             idx = s.index.get_loc(r.end)
-            return Onset(first_active=s.index[idx + 1], dormant_days=r.n_days)
+            following = ~off_mask(s, present).iloc[idx + 1:idx + 1 + params.LAUNCH_ACTIVE_DAYS]
+            observed = (int(present.iloc[:idx + 1].sum())
+                        if present is not None else r.n_days)
+            if (observed >= params.MIN_DAYS
+                    and len(following) == params.LAUNCH_ACTIVE_DAYS
+                    and following.all()):
+                return Onset(s.index[idx + 1], r.n_days, observed,
+                             params.LAUNCH_ACTIVE_DAYS)
     return None
 
 
