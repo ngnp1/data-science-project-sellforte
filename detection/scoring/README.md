@@ -1,86 +1,75 @@
-# Scoring and ranking
+# Scoring
 
-A detector only reports *what* it found: a market, a channel, a pattern and some dates. This package then asks two questions about each finding:
+The detector finds changes in advertising spend. It gives each finding two
+scores: **Priority** and **Evidence**.
 
-1. **Is it real?** Did spend actually change the way the detector says? The app shows this as **Evidence**.
-2. **Is it useful?** Would the period teach us something about what advertising does? The app shows this as **Priority**, and ranks by it.
+## Priority
 
-A finding can be real but not useful. A clear 3-day pause is one example: it is too short to show anything. That is why there are two scores.
+Priority ranks findings by how useful they are to investigate.
 
-Every detector's findings go through this package, so all of them are judged the same way.
+| Criterion | Weight |
+|---|---:|
+| Long enough to see after-effects | 25% |
+| Comparison available | 20% |
+| Size of the spend change | 15% |
+| No overlapping findings | 15% |
+| Sales moved clearly | 15% |
+| Pattern type | 10% |
 
-```python
-from detection.scoring import score_findings, ranked
+- **Long enough to see after-effects**: Longer periods make it easier to see
+  how long advertising continues to work. Full credit starts at 28 days.
+- **Comparison available**: Another market or channel ran normally during the
+  finding.
+- **Size of the spend change**: Larger changes are easier to study.
+- **No overlapping findings**: Another change in the same market makes the
+  result harder to interpret.
+- **Sales moved clearly**: Sales during the finding differ from the previous
+  eight weeks by more than normal sales variation. This does not show that
+  advertising caused the change.
+- **Pattern type**: Some patterns usually give a clearer comparison. For
+  example, all advertising off is usually easier to study than a budget step.
 
-findings = score_findings(findings, build_panel(media, sales))
-order = ranked(findings)   # most useful first
-```
+The app labels Priority as **High** at 0.75 or above, **Medium** from 0.50 to
+0.74, and **Low** below 0.50. A finding that touches the first or last day of
+the data gets lower Priority because it may continue outside the data.
 
-## How a score is built
+## Evidence
 
-Each score is a set of checks. Every check gives a number from 0 (bad) to 1 (good). The score is a weighted average of the checks, so it is also between 0 and 1. In the app, open a period's **Details** to see each check's value.
+Evidence measures how clearly the spend data supports the finding. The weights
+depend on the type of finding.
 
-## Is it useful? (Priority)
+| Criterion | All ads off | Only one on | One paused | Pulsing | Late launch | Budget step |
+|---|---:|---:|---:|---:|---:|---:|
+| How completely spend changed | 20% | 20% | 25% | 25% | 20% | 45% |
+| Long enough | 15% | 15% | 20% | 10% | 20% | 20% |
+| Unusual for this channel | 15% | 15% | 25% | 30% | 20% | 0% |
+| Clean start and stop | 10% | 10% | 10% | 15% | 10% | 25% |
+| Impressions agree | 15% | 15% | 20% | 20% | 30% | 10% |
+| All channels agree | 25% | 25% | 0% | 0% | 0% | 0% |
 
-| Check | What it asks | Full marks (1.0) when | Weight |
-|---|---|---|---|
-| **Long enough** | Is the period long enough to see the effect of ads fade after they stop? | It lasts 4 weeks or more. Two weeks gets 0.5. For on–off pulsing, the shortest pause counts. | 25% |
-| **Comparison** | Is there something to compare it with? | Another market kept the same channel running. If not, another channel in the same market kept running: 0.7. If neither: 0.3. | 20% |
-| **Size of change** | How big was the change in spend? | Spend dropped to zero, or the budget tripled (or fell to a third). | 15% |
-| **No overlap** | Did something else change in that market at the same time? | Nothing overlapped. With an overlap: 0.6. | 15% |
-| **Sales moved** | Did sales move clearly during the period? It compares average daily sales with the 8 weeks before, measured against how much sales normally go up and down. | Sales moved at least 3 times their usual ups and downs. With no sales data, or less than 8 weeks of history: 0.5. | 15% |
-| **Pattern type** | How useful is this kind of pattern in general? | All advertising off: 1.0. Only one channel on, or pulsing: 0.9. One channel paused: 0.75. Staggered launch: 0.6. Budget step: 0.45. | 10% |
+- **How completely spend changed**: A full stop is stronger evidence than a
+  small reduction. A larger budget step is also stronger evidence.
+- **Long enough**: A longer change is less likely to be a short blip. Full
+  credit starts at 14 days.
+- **Unusual for this channel**: A rare pause is more meaningful than a pause
+  that happens often.
+- **Clean start and stop**: A sharp change is clearer than a gradual drift.
+- **Impressions agree**: Impressions should stop when spend stops. Continuing
+  impressions can indicate a tracking problem.
+- **All channels agree**: For market-wide findings, the channels that should
+  be off need to be off.
 
-If a period starts on the first day of the data, or ends on the last day, its score is multiplied by 0.7. It may have started earlier or kept going, so part of it is unseen.
+The app labels Evidence as **Strong** at 0.80 or above, **Moderate** from 0.60
+to 0.79, and **Weak** below 0.60.
 
-The **Priority** label is **High** at 0.75 or more, **Medium** at 0.5 or more, otherwise **Low**.
+## Warnings
 
-## Is it real? (Evidence)
+Warnings do not remove a finding.
 
-| Check | What it asks | Full marks (1.0) when |
-|---|---|---|
-| **How completely spend changed** | Did spend really stop, or only dip? | Spend fell to exactly zero. For a budget step: the jump was far outside the channel's normal range. |
-| **Long enough** | Could this be a short blip? | It lasts 2 weeks or more. |
-| **Unusual for this channel** | Does this channel pause like this all the time? | The pause is at least 3 times longer than the channel's usual pauses, or the channel never pauses otherwise. |
-| **Clean start and stop** | Did spend switch off and on sharply, or drift? | Spend was at its normal level right up to the start and from the day after the end. |
-| **Impressions agree** | Did impressions stop too? If impressions kept coming, the spend data may simply be missing. | Impressions fell to zero as well. If impressions kept coming: 0.2. With no impression data: 0.6. |
-| **All channels agree** | For "all advertising off" and "only one channel on": did every channel that should be off really stop? | All of them did. Other patterns are not checked for this. |
+- **Possible data gap**: Data rows are missing during the finding, or every
+  channel in every market stopped at once.
+- **Possible tracking loss**: Impressions continued while spend was off or
+  nearly off.
 
-The weights depend on the pattern type, because each pattern leaves different evidence. A budget step leans most on how big the jump was (45%). Pulsing leans most on being unusual for the channel (30%). The exact weights are in `CONFIDENCE_WEIGHTS` in [params.py](../params.py).
-
-The **Evidence** label is **Strong** at 0.8 or more, **Moderate** at 0.6 or more, otherwise **Weak**.
-
-## The order in the app
-
-`ranked()` puts the most useful findings first. When two are equally useful, the one with stronger evidence comes first. Findings with no scores go last.
-
-Data warnings don't change the order. Tick **Hide periods with data warnings** in the sidebar to hide them.
-
-## The Sales change column is separate
-
-The **Sales change** column in the app is not part of either score and does not affect the order. It is calculated in [ui/readout.py](../../ui/readout.py) like this:
-
-1. Compare the market's average daily sales during the period with the same number of days just before it. If those days are taken by another finding, it uses the days just after.
-2. Do the same for other markets that had nothing unusual going on in those weeks, and take their average.
-3. The Sales change is how much more, or less, the market changed than the other markets did. This strips out things that hit every market, such as seasons or holidays.
-4. If the change is smaller than twice the market's usual week-to-week swing, the app calls it small. It may be chance.
-
-How it differs from the **Sales moved** check:
-- **Sales moved** compares the market with its own past.
-- **Sales change** compares the market with other markets.
-
-To view periods by sales impact, set **Sort by** above the table to **Biggest sales change**. Rank still shows the usefulness order.
-
-## Files
-
-| File | What it does |
-|---|---|
-| [findings.py](findings.py) | `score_findings`: adds the scores, data-quality checks and an explanation to each finding. |
-| [score.py](score.py) | The checks behind both scores. |
-| [validity.py](validity.py) | Data-quality checks, such as missing days. |
-| [explain.py](explain.py) | The plain-language explanation. |
-| [rank.py](rank.py) | `ranked`: the order findings are shown in. |
-
-To change a weight or a limit, edit [params.py](../params.py). The Priority and Evidence labels are set in [ui/labels.py](../../ui/labels.py).
-
-These scores are rules of thumb, not probabilities. They don't say how much sales the advertising caused.
+Priority and Evidence help you choose what to investigate. They do not prove
+that advertising caused a sales change.

@@ -7,7 +7,7 @@ The app and the evaluation harness run any detector registered here. Our rule-ba
 | Key | Name | Code |
 |---|---|---|
 | `rule_based` | Rule-based (ours) | [`detection/`](../detection/README.md) |
-| `team` | Combined | [`team/`](../team/__init__.py): single channel by Nam Phu, staggered launch by tvh-ds, everything else by Triet |
+| `team` | Combined | [`team/`](../team/__init__.py) |
 
 Score either one on the sample with `python -m scripts.evaluate_sample --detector <key>`.
 
