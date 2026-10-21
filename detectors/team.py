@@ -16,20 +16,31 @@ import pandas as pd
 
 from detection.model import EVENT_TYPES, DetectedEvent
 from detectors.base import Detector
-from team.holdout import run_detection as thai
 from team.pulse.detect import detect as triet
 from team.single_channel import run_detection as nam_phu
 from team.staggered_launch import run_detection as tvh_ds
-from team.step_change import detect as david
 
-# Teammate -> (their entry point, the patterns taken from it).
+# Teammate -> (their entry point, the periods taken from it). Chosen by the
+# development split: Triet's detector is the strongest on steps and holdouts,
+# Nam Phu's on single-channel periods; tvh-ds's launches match the others and
+# carry readiness checks. Thai's and David's modules stay in the team package.
 SOURCES = (
     ("Nam Phu", lambda media, sales: nam_phu(media, sales, ""), {"single_channel"}),
-    ("Thai", lambda media, sales: thai(media, sales, ""), {"natural_holdout"}),
     ("tvh-ds", lambda media, sales: tvh_ds(media, sales, ""), {"staggered_launch"}),
-    ("Triet", lambda media, sales: triet(media, sales, ""), {"channel_pulse", "dark_period"}),
-    ("David", lambda media, sales: david(media, sales, ""), {"step_change"}),
+    ("Triet", lambda media, sales: triet(media, sales, ""),
+     {"channel_pulse", "dark_period", "natural_holdout", "step_change"}),
 )
+
+
+def _drop_renamed_holdouts(findings: list[DetectedEvent]) -> list[DetectedEvent]:
+    """In a two-channel market one channel pausing while the other runs is
+    both a holdout and a single-channel period. When Triet's holdout covers
+    exactly the window of Nam Phu's single-channel period, keep only the
+    single-channel name -- the benchmark's convention for that shape."""
+    singles = {(f.country_code, f.start, f.end) for f in findings
+               if f.event_type == "single_channel"}
+    return [f for f in findings if not (f.event_type == "natural_holdout"
+                                        and (f.country_code, f.start, f.end) in singles)]
 
 
 def _convert(event, owner: str) -> DetectedEvent:
@@ -67,6 +78,7 @@ class TeamDetector(Detector):
         for owner, run, patterns in SOURCES:
             findings += [_convert(e, owner) for e in run(media, sales)
                          if e.event_type in patterns]
+        findings = _drop_renamed_holdouts(findings)
         return sorted(findings, key=lambda f: (str(f.country_code), f.start, str(f.channel)))
 
 

@@ -1,4 +1,6 @@
 """The teammates' algorithms combined behind the Detector interface."""
+from dataclasses import replace
+
 import pandas as pd
 import pytest
 
@@ -8,8 +10,8 @@ from detectors import registry
 from tests.conftest import GENERATOR_DIR
 
 SAMPLE = GENERATOR_DIR / "data"
-OWNERS = {"single_channel": "Nam Phu", "natural_holdout": "Thai", "staggered_launch": "tvh-ds",
-          "channel_pulse": "Triet", "dark_period": "Triet", "step_change": "David"}
+OWNERS = {"single_channel": "Nam Phu", "natural_holdout": "Triet", "staggered_launch": "tvh-ds",
+          "channel_pulse": "Triet", "dark_period": "Triet", "step_change": "Triet"}
 
 
 @pytest.fixture(scope="module")
@@ -62,3 +64,16 @@ def test_staggered_launches_keep_tvh_ds_readiness_checks(frames, team_findings):
     panel = build_panel(*frames)
     lines = viewer.caveats(launch, readout(launch, panel, team_findings))
     assert any(line.startswith("Launch analysis readiness:") for line in lines)
+
+
+def test_a_holdout_on_the_same_window_as_a_single_channel_period_is_dropped():
+    from detectors.team import _drop_renamed_holdouts
+    day = pd.Timestamp
+    single = DetectedEvent(sid="", country_code="NL", channel="TikTok", event_type="single_channel",
+                           start=day("2025-07-23"), end=day("2025-09-02"))
+    same = DetectedEvent(sid="", country_code="NL", channel="Instagram", event_type="natural_holdout",
+                         start=day("2025-07-23"), end=day("2025-09-02"))
+    other = replace(same, start=day("2025-07-24"))
+    elsewhere = replace(same, country_code="SE")
+    kept = _drop_renamed_holdouts([single, same, other, elsewhere])
+    assert same not in kept and all(f in kept for f in (single, other, elsewhere))
