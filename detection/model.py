@@ -9,8 +9,12 @@ here mentions the harness or any truth loader.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import pandas as pd
+
+if TYPE_CHECKING:
+    from detection.io.panel import Panel
 
 EVENT_TYPES: frozenset[str] = frozenset({
     "dark_period",
@@ -58,3 +62,21 @@ class DetectedEvent:
     @property
     def n_days(self) -> int:
         return int((self.end - self.start).days) + 1
+
+
+def subject_channels(event: DetectedEvent, panel: "Panel") -> list[str]:
+    """The channels this event actually makes a claim about.
+
+    Part of the output contract, so it lives beside DetectedEvent: anything
+    that reads a finding -- this library's scoring, or a viewer showing any
+    detector's output -- needs the same answer. A dark period claims every
+    channel in the market. A single_channel event names the channel still
+    RUNNING, so its subjects are all the others -- the same inversion that
+    produced a real defect in the cross-market layer.
+    """
+    country = event.country_code
+    if event.event_type == "dark_period":
+        return panel.channels_in(country)
+    if event.event_type == "single_channel":
+        return [ch for ch in panel.channels_in(country) if ch != event.channel]
+    return [event.channel] if event.channel else []

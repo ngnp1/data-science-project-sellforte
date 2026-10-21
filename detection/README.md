@@ -1,69 +1,62 @@
 # How the detector works
 
-The detector reads daily media spend and returns a list of events. Sales data is optional: it helps rank findings but is not needed to find spend changes.
-
-## Use it in Python
-
-After following the [project setup](../README.md), run this from the repository folder:
+The detector reads daily media spend and returns a list of findings. Sales data is optional: it only helps rank findings.
 
 ```python
 import pandas as pd
 from detection.pipeline import run_detection
 
 media = pd.read_csv("synthetic_data_generator/data/media.csv")
-events = run_detection(media, sid="sample")
-
-for event in events:
-    print(event.event_type, event.start, event.end, event.explanation)
+sales = pd.read_csv("synthetic_data_generator/data/sales.csv")
+for event in run_detection(media, sales, sid="sample"):
+    print(event.event_type, event.country_code, event.channel, event.start, event.end)
 ```
 
-To include sales, load its CSV and pass it as `run_detection(media, sales, sid="sample")`. See the [input columns](../README.md#use-your-own-data).
+## Input data
 
-## From data to findings
-
-1. **Prepare daily data.** Sum campaign rows by market, channel, and date. Keep track of missing rows so they can trigger warnings.
-2. **Estimate normal spend.** Use each channel's positive spend to estimate its usual level. This lets the same rules work across markets of different sizes.
-3. **Find changes.** Look for pauses, sustained budget changes, repeated pauses, and channels that start late.
-4. **Assign event types.** Check which other channels stayed active. For example, all channels pausing together becomes a dark period. With two channels, a pause in one is labelled a natural holdout.
-5. **Compare markets.** Look for peers that kept the relevant channels active throughout the event, and compare launch dates.
-6. **Score and explain.** Return the finding, its evidence, possible data problems, and a readable explanation.
-
-## The main rules
-
-| Pattern | How it is found |
+| File | Required columns |
 |---|---|
-| Pause | Spend is at most 15% of the channel's usual positive level, with a small floor for values close to zero. Runs must meet duration and notability rules. |
-| Budget change | Compare spending levels around a possible change and check that the new level lasts. Restarting from zero alone is not enough. |
-| Pulse | Group nearby pauses of similar length. The rule does not require perfectly regular spacing. Each off-window is stored separately. |
-| Late launch | Find an initial inactive period followed by activity, then compare it with other markets. |
+| Media | `date`, `country_code`, `advertising_channel`, `media_investment` (optional: `impressions`, `clicks`) |
+| Sales (optional) | `date`, `country_code`, `turnover` |
 
-Late launches require 14 consecutive observed active days and at least 14 days
-of separation from the earliest qualifying market. A separate readiness screen
-checks 8 weeks before and 4 weeks after launch for data coverage, untreated
-comparison markets, competing changes, and comparable sales. See the
-[staggered launch implementation guide](compose/staggered_launch/README.md) for the rules,
-assessment output, and limitations. Readiness does not estimate sales effects.
+Dates look like `2024-06-24`, and spend must be non-negative. Rows for the same day, market and channel are summed.
 
-The minimum reportable duration is seven days. Exact thresholds live in [params.py](params.py); the pattern rules live in [primitives/](primitives/).
+## Steps
 
-## Read an event
+1. **Prepare daily data.** Sum campaign rows by market, channel and date, and remember which rows were missing.
+2. **Estimate normal spend** per channel from its positive spend, so the same rules work for small and large markets.
+3. **Find changes:** pauses, budget steps, repeated pauses and late starts.
+4. **Label them** by checking which other channels kept running.
+5. **Compare markets** to find peers that kept running, and to compare launch dates.
+6. **Score and explain** each finding, and flag possible data problems.
 
-Each [DetectedEvent](model.py) includes its type, market, channel, dates, scores, explanation, and validity warnings. A dark period has no single channel. Both dates are inclusive. For pulses, `components` contains the individual off-windows; `start` and `end` cover the whole group.
+## Main rules
 
-Confidence and informativeness are heuristic scores, not probabilities or estimates of advertising's effect on sales. The old calibration is retained for reference but is not applied.
-
-A `censored_start` or `censored_end` flag means the data does not show the event's full boundary. For example, a permanent budget change is reported through the last available day, without claiming it stopped then. Overlapping events reduce informativeness because their effects may be difficult to separate.
-
-Missing rows or a spend pause without a corresponding drop in available impressions can trigger validity warnings. Unknown, infinite, or negative spend values are rejected. Optional missing metrics are treated as unknown evidence.
-
-## Where to make changes
-
-| Files | Responsibility |
+| Pattern | Rule |
 |---|---|
-| [pipeline.py](pipeline.py) | Runs detection from beginning to end. |
-| [io/](io/) | Prepares and rescales daily data. |
+| Pause | Spend at most 15% of the channel's usual level, for at least seven days. |
+| Budget step | A sharp, lasting change in level. A step that never reverses must also differ from the channel's last quarter of active spend, so a return to normal after a pause or a short bump is not reported. |
+| Pulse | Nearby pauses of similar length, grouped into one finding. |
+| Late launch | An initial inactive period, compared with other markets. |
+
+With only two channels, one pausing while the other runs is labelled a holdout. From spend alone this cannot be told apart from "only one channel on", so the choice is deliberate.
+
+Thresholds are in [params.py](params.py) and the pattern rules in [primitives/](primitives/).
+
+## A finding
+
+A [DetectedEvent](model.py) has a type, market, channel (`None` for a dark period), inclusive start and end dates, scores, data-quality flags and an explanation. For a pulse, `components` lists each pause. `censored_start` and `censored_end` mean the period touches the edge of the data.
+
+Scores are heuristics, not probabilities, and not estimates of what advertising caused.
+
+## Code map
+
+| Files | Job |
+|---|---|
+| [pipeline.py](pipeline.py) | Runs everything. |
+| [io/](io/) | Prepares and rescales the data. |
 | [primitives/](primitives/) | Finds individual patterns. |
-| [compose/](compose/) | Labels events and compares markets. |
-| [score.py](score.py), [validity.py](validity.py), [explain.py](explain.py) | Ranks findings, checks data quality, and writes explanations. |
+| [compose/](compose/) | Labels findings and compares markets. |
+| [score.py](score.py), [validity.py](validity.py), [explain.py](explain.py) | Scores, data checks, explanations. |
 
-Keep detection independent of benchmark definitions and answer files. Tests check this code boundary. See the [project limitations](../README.md#what-the-scores-mean) before interpreting results.
+`detection/` must never import the benchmark or its answers. A test checks this.

@@ -78,6 +78,16 @@ SHARPNESS_WINDOW = 3
 # slightly; lower lets a decaying spike pass as a step.
 PERSIST_FRACTION = 0.5
 
+# The reference an UNPAIRED (open-ended) shift is judged against: the last
+# REFERENCE_DAYS active days before it, off-windows left out. The W days the
+# z compares can themselves be the abnormal stretch -- a pause at a trickle,
+# or a short bump whose gradual opening went undetected -- so the reference
+# reaches further back; but not so far that a long trend or an earlier step
+# sets it, which would hide a genuine permanent change. A quarter (4 W) keeps
+# a campaign-length excursion of up to about six weeks under half of the
+# window, so it cannot set the median. Chosen on that argument, not fitted.
+REFERENCE_DAYS = 4 * W
+
 # An opposite-sign shift closes a step episode only if its magnitude is
 # comparable -- within this factor either way of the opening shift. Wider pairs
 # a step's end with an unrelated later shift; narrower leaves real episodes

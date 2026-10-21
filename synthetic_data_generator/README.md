@@ -1,21 +1,17 @@
 # Generate synthetic marketing data
 
-This generator creates daily advertising spend and sales with known changes, such as a pause or a budget increase. The known events let us check whether the detector finds the right periods.
+This generator creates daily ad spend and sales with known events, such as a pause or a budget increase, so we can check that the detector finds them. A ready-made sample is in [data/](data/). The app and the sample check need no R.
 
-The repository already includes a sample in [data/](data/). You can run the viewer and sample checks without installing R.
+## How it works
 
-## How generation works
+1. [generate_with_simmmulator.R](generate_with_simmmulator.R) uses [siMMMulator](https://github.com/facebookexperimental/siMMMulator) to simulate spend and sales, applying the configured events to spend.
+2. [reformat.py](reformat.py) writes the project's CSV format and the answer files.
 
-1. [The R script](generate_with_simmmulator.R) uses [siMMMulator](https://github.com/facebookexperimental/siMMMulator) to simulate spend and sales. It changes spend according to the configured events before calculating media response, lingering ad effects, and saturation.
-2. [The Python script](reformat.py) reshapes the output into the project's CSV format and writes the answers used for checking detections.
-
-Both scripts read [config.yaml](config.yaml) for markets, channels, and simulation settings, and [events_config.yaml](events_config.yaml) for inserted events. See the [parameter reference](DETAILS.md) when changing them.
+Markets, channels and simulation settings are in [config.yaml](config.yaml), and the inserted events are in [events_config.yaml](events_config.yaml). Every field is described in the [settings reference](DETAILS.md).
 
 ## Setup
 
-Use the Python environment from the [main setup](../README.md#run-the-viewer). No second virtual environment is needed.
-
-To generate new data, also install R and run these commands in an R console:
+Use the Python environment from the [main README](../README.md#run-the-app). Then install R, and in an R console run:
 
 ```r
 install.packages(c("remotes", "yaml", "dplyr"))
@@ -24,28 +20,30 @@ remotes::install_github("facebookexperimental/siMMMulator")
 
 ## Generate a separate sample
 
-With the Python environment active, start in the repository folder:
-
 ```bash
 cd synthetic_data_generator
 Rscript generate_with_simmmulator.R --outdir generated
 python reformat.py --outdir generated
 ```
 
-Both commands use the same output directory. This writes a new sample to `generated/` and leaves the committed `data/` sample in place. To change the simulation, edit the YAML settings and rerun both commands.
+This writes to `generated/` and leaves `data/` alone.
 
 | Output | Contents |
 |---|---|
-| `raw_daily_wide.csv` | Intermediate output from R, read by Python. |
 | `media.csv` | Daily spend and media measurements by market and channel. |
-| `sales.csv` | Daily turnover split by market, customer type, and sales channel. |
-| `ground_truth.csv` | The inserted events, for evaluation only. |
-| `true_roi.csv` | Simulated attributed revenue divided by spend for each channel; not an estimate from real data. |
+| `sales.csv` | Daily turnover by market, customer type and sales channel. |
+| `ground_truth.csv` | The inserted events (for evaluation only). |
+| `true_roi.csv` | Simulated revenue ÷ spend per channel. |
+| `raw_daily_wide.csv` | Intermediate output from R. |
 
-## Events in the included sample
+## The included sample
 
-The configuration includes a German dark period, a Finnish period with only Google Search active, an Austrian Facebook holdout, a Swiss Google Search budget increase, three German Radio pauses, and a late US Instagram launch.
+It contains six events:
+- a German dark period;
+- a Finnish period with only Google Search running;
+- an Austrian Facebook holdout;
+- a Swiss Google Search budget increase;
+- three German Radio pauses (one pulse event);
+- a late US Instagram launch.
 
-Those are six grouped events: the three Radio pauses form one pulse train. Exact offsets and settings are in [events_config.yaml](events_config.yaml). For precise dates, use its day offsets; the legacy `ground_truth.csv` end dates do not consistently use the detector's inclusive convention.
-
-For many scenarios instead of one sample, use the [benchmark generator](../benchmark/BENCHMARK.md).
+For exact dates, use the day offsets in `events_config.yaml`. For many scenarios at once, use the [benchmark generator](../benchmark/BENCHMARK.md).

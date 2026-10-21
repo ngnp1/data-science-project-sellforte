@@ -49,7 +49,8 @@ def test_dev_runs_freely_and_appends_history(tmp_path):
     lines = hist.read_text().splitlines()
     assert len(lines) == 1
     last = json.loads(lines[0])
-    for key in ["timestamp", "label", "detector", "source_hash", "metrics"]:
+    for key in ["timestamp", "label", "detector", "source_hash", "detectors_source_hash",
+                "metrics"]:
         assert key in last
     assert last["metrics"]["f1"] == 1.0
 
@@ -358,3 +359,46 @@ def test_build_record_is_self_describing(tmp_path, monkeypatch):
     assert record["sealed_spec_hash"] == "deadbeef"
     assert record["metrics"]["f1"] == 1.0
     assert "detection_source_hash" in record and "timestamp" in record
+
+
+
+def _detector_sources() -> list:
+    """Every file a registered detector's code can live in: the detectors/
+    package itself and each registered detector class's own module, wherever
+    that module sits -- for_detector() will score any of them."""
+    import inspect
+
+    from detectors import registry
+    files = {f for f in (ROOT / "detectors").rglob("*.py") if "__pycache__" not in f.parts}
+    files |= {Path(inspect.getsourcefile(type(d))).resolve() for d in registry.available()}
+    return sorted(files)
+
+
+def test_detectors_have_no_import_path_to_truth():
+    """The harness now scores whatever is registered, not only detection/, so
+    the same static guard has to reach every registered detector's code."""
+    offenders = [f"{f}: {found}" for f in _detector_sources()
+                 if (found := _truth_reaching_imports(f.read_text()))]
+    assert not offenders, f"a detector reaches for truth: {offenders}"
+
+
+def test_the_detectors_package_contains_only_source():
+    pkg = ROOT / "detectors"
+    intruders = [str(f.relative_to(ROOT)) for f in pkg.rglob("*")
+                 if f.is_file() and f.suffix != ".py"
+                 and f.name not in NON_SOURCE_EXEMPT_FILENAMES
+                 and "__pycache__" not in f.parts]
+    assert not intruders, f"non-source files under detectors/: {intruders}"
+
+
+def test_the_final_record_hashes_the_detectors_package_too():
+    from types import SimpleNamespace
+
+    from benchmark.eval import run_final
+    from benchmark.eval.run_dev import source_hash
+    results = {"overall": {"precision": 1.0, "recall": 1.0, "f1": 1.0},
+               "iou": {"mean_iou": 1.0}, "null_fp_rate": 0.0, "n_scenarios": 1}
+    record = run_final.build_record(results, SimpleNamespace(detector="x"), 1,
+                                    {"spec_hash": "s", "sealed_at": "t"})
+    assert record["detectors_source_hash"] == source_hash(ROOT / "detectors")
+    assert record["detection_source_hash"] == source_hash(ROOT / "detection")

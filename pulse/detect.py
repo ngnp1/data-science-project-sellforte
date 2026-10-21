@@ -1,0 +1,41 @@
+# Benchmark adapter: media.csv -> channel_pulse events.
+from __future__ import annotations
+
+import pandas as pd
+
+from benchmark.eval.model import Event
+from pulse.hsmm import p_off_hsmm
+from pulse.onoff import RHO, active_level
+from pulse.pulse import find_pulse_trains, off_runs, pulse_probability
+
+
+def run_series(s: pd.Series, present: pd.Series | None = None):
+    # [(train, pulse probability, absorbed spike days)] for one channel's daily spend.
+    p = p_off_hsmm(s, present)
+    cut = RHO * active_level(s)
+    # Keep runs whose median spend (days with data) is <= RHO x usual.
+    ok = s if present is None else s[present.astype(bool)]
+    runs = [r for r in off_runs(p >= 0.5, present) if ok.loc[r[0]:r[1]].median() <= cut]
+    out = []
+    for t in find_pulse_trains(runs):
+        # Days called off although spend was above the cutoff: absorbed spikes.
+        spikes = tuple(d for a, b in t.components for d, v in s.loc[a:b].items() if v > cut)
+        out.append((t, pulse_probability(p, t.components, runs), spikes))
+    return out
+
+
+def detect(media_df, sales_df, sid: str) -> list[Event]:
+    if media_df is None:
+        raise ValueError("pass --load-data so the detector gets media.csv")
+    m = media_df.assign(date=pd.to_datetime(media_df["date"]))
+    days = pd.date_range(m["date"].min(), m["date"].max())
+    events = []
+    for (country, channel), g in m.groupby(["country_code", "advertising_channel"]):
+        daily = g.groupby("date")["media_investment"].sum()
+        s, present = daily.reindex(days, fill_value=0.0), pd.Series(days.isin(daily.index), index=days)
+        for t, prob, spikes in run_series(s, present):
+            events.append(Event(sid=sid, country_code=country, channel=channel,
+                                event_type="channel_pulse", start=t.start, end=t.end,
+                                components=t.components, detection_confidence=prob,
+                                tags=tuple(f"spike_absorbed:{d.date()}" for d in spikes)))
+    return events

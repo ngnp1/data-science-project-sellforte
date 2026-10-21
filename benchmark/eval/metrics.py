@@ -13,6 +13,7 @@ Two of them are easy to get quietly wrong and are worth naming here:
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from dataclasses import replace
 
 import numpy as np
 
@@ -101,6 +102,28 @@ def day_level(truth: list[Event], pred: list[Event]) -> dict:
     return prf(tp, len(p_days - t_days), len(t_days - p_days))
 
 
+def pulse_components(truth: list[Event], pred: list[Event]) -> dict:
+    """Score actual off-windows separately from pulse envelope/grouping.
+
+    Missing prediction components never fall back to the outer interval.
+    Grouping quality remains measured by the main event-level metric.
+    """
+    t = [e for e in truth if e.event_type == "channel_pulse"]
+    p = [e for e in pred if e.event_type == "channel_pulse"]
+    def expand(events):
+        return [replace(e, start=start, end=end, components=())
+                for e in events for start, end in e.components]
+    tc, pc = expand(t), expand(p)
+    return {
+        "event_level": event_level(tc, pc),
+        "day_level": day_level(tc, pc),
+        "n_truth_pulses": len(t),
+        "n_pred_pulses": len(p),
+        "missing_truth_components": sum(not e.components for e in t),
+        "missing_pred_components": sum(not e.components for e in p),
+    }
+
+
 def type_confusion(truth: list[Event], pred: list[Event]) -> dict:
     """Which truth type got called which detector label, over relaxed matches
     that agree on country and channel -- so this isolates TYPE errors rather
@@ -158,6 +181,11 @@ def operating_curve(truth: list[Event], pred: list[Event],
     "at cut 0.5 you get P=x R=y; at 0.8, P=x' R=y'" instead of implying the
     detector has a single fixed accuracy.
     """
+    # A mixed scored/unscored set cannot be filtered consistently. Keep the
+    # ordinary headline metrics, but do not manufacture a threshold curve.
+    if not pred or any(p.detection_confidence is None for p in pred):
+        return []
+
     if cuts is None:
         # np.arange's end is half-open, so the sweep must reach 1.0 via
         # linspace instead -- otherwise the strictest cut is silently
@@ -193,5 +221,6 @@ def evaluate_scenario(truth: list[Event], pred: list[Event]) -> dict:
         "boundary": boundary_error(strict),
         "accuracy": channel_and_market_accuracy(truth, pred),
         "day_level": day_level(truth, pred),
+        "pulse_components": pulse_components(truth, pred),
         "confusion": type_confusion(truth, pred),
     }

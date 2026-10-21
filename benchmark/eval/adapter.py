@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from benchmark.eval.model import Event
 from detection.model import DetectedEvent
-from detection.pipeline import run_detection
 
 
 def to_event(d: DetectedEvent) -> Event:
@@ -28,16 +27,32 @@ def to_event(d: DetectedEvent) -> Event:
     )
 
 
-def detect(media_df, sales_df, sid: str) -> list[Event]:
-    """The scoreable detector callable.
+def for_detector(key: str):
+    """The scoreable callable for any registered detector (detectors.registry).
 
     `run_dev` and `run_final` pass None for both frames unless --load-data is
     given. Returning [] there would look like a detector that found nothing
     rather than a misconfigured run -- and on the one-shot final gate that
     would burn the run and record a 0.0 audit line. So it raises instead.
+    An unknown key fails here, before any scenario is scored.
     """
-    if media_df is None:
-        raise ValueError(
-            "detect() needs the media frame; pass --load-data to run_dev "
-            "or run_final")
-    return [to_event(d) for d in run_detection(media_df, sales_df, sid)]
+    from dataclasses import replace
+
+    from detectors import registry
+
+    detector = registry.get(key)
+
+    def run(media_df, sales_df, sid: str) -> list[Event]:
+        if media_df is None:
+            raise ValueError(
+                "detect() needs the media frame; pass --load-data to run_dev "
+                "or run_final")
+        return [to_event(replace(d, sid=sid)) for d in detector.detect(media_df, sales_df)]
+
+    return run
+
+
+def detect(media_df, sales_df, sid: str) -> list[Event]:
+    """Our rule-based library, the harness's default detector:
+    `--detector benchmark.eval.adapter:detect`."""
+    return for_detector("rule_based")(media_df, sales_df, sid)
