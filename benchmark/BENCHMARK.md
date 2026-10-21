@@ -1,83 +1,57 @@
-# The Benchmark
+# Benchmark data
 
-This benchmark contains synthetic marketing-spend datasets. Each dataset has a known answer stored in a separate file. You run a detector on the data, then compare its results with the hidden answers.
+The benchmark has 100 synthetic datasets ("scenarios"), each with daily spend, sales and a separate answer file listing the inserted events.
 
-There are 100 datasets, called **scenarios**. Each scenario contains a company’s daily advertising spend and sales data for one or more countries and channels, covering one or two years.
+- **dev**: 45 scenarios for developing the detector.
+- **test**: 55 sealed scenarios for the final evaluation. Looking at test answers during development makes the test score meaningless.
 
-## The two splits
+| Scenario family | Dev | Test |
+|---|---:|---:|
+| No event | 4 | 5 |
+| Dark period | 3 | 4 |
+| Single-channel period | 3 | 4 |
+| Natural holdout | 3 | 4 |
+| Step change | 5 | 6 |
+| Channel pulse | 3 | 4 |
+| Staggered launch | 3 | 4 |
+| Cross-market event | 3 | 4 |
+| Several events | 8 | 10 |
+| Edge cases | 10 | 10 |
+| **Total** | **45** | **55** |
 
-The scenarios are divided into two groups:
+Scenarios with no event measure false alarms.
 
-* **`dev`**: 45 scenarios for developing and testing your detector. You can check the correct answers as often as needed.
-* **`test`**: 55 scenarios for the final evaluation. Do not check the answers in advance.
+## Get data ready
 
-This separation makes the final score meaningful. If you tune a detector using the same data on which it is evaluated, the score may no longer reflect how well it performs on unseen data.
-
-## File locations
-
-```text
-benchmark/datasets/dev/<scenario_id>/media.csv
-benchmark/datasets/dev/<scenario_id>/sales.csv
-benchmark/datasets/dev_truth/<scenario_id>/ground_truth.csv
-```
-
-The test split follows the same structure:
-
-```text
-benchmark/datasets/test/<scenario_id>/...
-benchmark/datasets/test_truth/<scenario_id>/...
-```
-
-## What each scenario contains
-
-Each scenario contains a small number of artificial **events** inserted into otherwise normal spend data. An event is a period during which something unusual happens: for example, a channel stops spending or its budget suddenly changes.
-
-The benchmark includes the following event types:
-
-| Event                 | Description                                                    |
-| --------------------- | -------------------------------------------------------------- |
-| Dark period           | All channels in a market stop spending at the same time.       |
-| Single-channel period | All channels except one stop spending.                         |
-| Natural holdout       | One channel stops while the others continue running.           |
-| Step change           | A channel’s spend jumps to a new level and remains there.      |
-| Channel pulse         | A channel repeatedly switches on and off.                      |
-| Staggered launch      | A channel starts running later in some markets than in others. |
-
-Some scenarios contain no event. These scenarios measure how often a detector raises a false alarm on normal data.
-
-## Scenario distribution
-
-| Scenario family         |    Dev |   Test |
-| ----------------------- | -----: | -----: |
-| No event                |      4 |      5 |
-| Dark period             |      3 |      4 |
-| Single-channel period   |      3 |      4 |
-| Natural holdout         |      3 |      4 |
-| Step change             |      5 |      6 |
-| Channel pulse           |      3 |      4 |
-| Staggered launch        |      3 |      4 |
-| Cross-market event      |      3 |      4 |
-| Several events combined |      8 |     10 |
-| Edge cases              |     10 |     10 |
-| **Total**               | **45** | **55** |
-
-The scenarios also vary in noise level, trends, number of countries, number of channels, and market size. This ensures that the detector is tested under a range of conditions.
-
-## Generating the data
-
-The data has already been generated and frozen. You only need these commands if you want to rebuild it from scratch:
+The generated CSVs are not in the repository. To create the dev split, install the [R dependencies](../synthetic_data_generator/README.md#setup), then run:
 
 ```bash
 python -m benchmark.harness.generate --split dev
-python -m benchmark.harness.generate --split test --seal
 ```
 
-The generator is deterministic. The `--seal` option locks the test split to prevent accidental changes.
+This writes inputs to `benchmark/datasets/dev/` and answers to `benchmark/datasets/dev_truth/`. To generate somewhere else, add `--root <folder>`; the evaluation commands only read `benchmark/datasets/`.
 
-## Scoring a detector
+The test split is sealed with checksums. Regenerated data may differ across library versions, so do not replace the seal.
 
-See [`benchmark/eval/README.md`](eval/README.md) for the exact command and an explanation of the score.
+## Folder layout
 
-## More information
+```text
+spec/       Scenario and event definitions.
+harness/    Runs the generator and records checksums.
+datasets/   Inputs (dev/, test/) and answers (dev_truth/, test_truth/), one folder per scenario.
+eval/       Scores detectors against the answers (see eval/README.md).
+```
 
-[`benchmark/STRUCTURE.md`](STRUCTURE.md) explains how the benchmark directory is organized and is intended for anyone extending the benchmark.
+| File | Purpose |
+|---|---|
+| [spec/scenarios.py](spec/scenarios.py) | Builds the scenario definitions. |
+| [harness/generate.py](harness/generate.py) | Generates datasets. |
+| [harness/seal.py](harness/seal.py) | Records and checks test-file checksums. |
+| [eval/adapter.py](eval/adapter.py) | Runs a registered detector for evaluation. |
+| [eval/run_dev.py](eval/run_dev.py), [eval/run_final.py](eval/run_final.py) | Evaluation commands. |
+
+## What a score means
+
+A score shows how well the detector finds the inserted patterns in this simulation. It says nothing certain about real company data. Some scenario settings vary together, so a difference between families cannot be blamed on one setting. The noise settings mainly affect sales, not spend.
+
+Next: [how evaluation works](eval/README.md).

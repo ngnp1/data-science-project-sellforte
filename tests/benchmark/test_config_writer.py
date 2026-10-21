@@ -46,6 +46,7 @@ def test_null_scenario_writes_an_empty_event_list(tmp_path):
     assert yaml.safe_load(ev_path.read_text()) == []
 
 
+@pytest.mark.requires_r
 def test_r_can_actually_read_the_generated_config(tmp_path):
     """The only test that proves the YAML dialect is compatible. R's yaml
     package is stricter than PyYAML about several constructs."""
