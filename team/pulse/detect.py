@@ -4,12 +4,12 @@ from __future__ import annotations
 import pandas as pd
 
 from benchmark.eval.model import Event
-from pulse.hsmm import p_off_hsmm
-from pulse.onoff import RHO, active_level
-from pulse.holdout import (find_dark_periods, find_holdouts, find_single_channel,
+from team.pulse.hsmm import p_off_hsmm
+from team.pulse.onoff import RHO, active_level
+from team.pulse.holdout import (find_dark_periods, find_holdouts, find_single_channel,
                            find_staggered_launches, market_p_off)
-from pulse.pulse import find_pulse_trains, off_spells, pulse_probability
-from pulse.step import find_steps
+from team.pulse.pulse import find_pulse_trains, off_spells, pulse_probability
+from team.pulse.step import find_steps
 
 
 def run_series(s: pd.Series, present: pd.Series | None = None):

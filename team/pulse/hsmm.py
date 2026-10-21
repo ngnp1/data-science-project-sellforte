@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from pulse.onoff import p_off
+from team.pulse.onoff import p_off
 
 HMM_EPS = 0.05      # P(a day's verdict is wrong): one odd day must not force a switch
 OFF_MEDIAN = 14.0   # typical pause length in days

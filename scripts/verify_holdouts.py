@@ -7,8 +7,8 @@ generated yet. The real evaluation is the harness:
 
 Run this from the repository root:
 
-    python verify_holdouts.py
-    python verify_holdouts.py --explain     # every window, its verdict, and why
+    python -m scripts.verify_holdouts
+    python -m scripts.verify_holdouts --explain     # every window, its verdict, and why
 
 Only the two patterns these detectors own are scored. Everything else in the
 answer key -- the dark period, the single-channel period, the pulse train, the
@@ -30,7 +30,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from detection.algorithms import (
+from team.holdout import (
     _find_pauses_ignoring_blips,
     _find_pulse_trains,
     _market_continuity,
@@ -41,7 +41,7 @@ from detection.algorithms import (
     prepare_daily_spend_panel,
 )
 
-DATA = Path(__file__).resolve().parent / "synthetic_data_generator" / "data"
+DATA = Path(__file__).resolve().parents[1] / "synthetic_data_generator" / "data"
 
 OWNED = {"natural_holdout", "staggered_launch"}
 

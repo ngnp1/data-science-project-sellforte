@@ -4,4 +4,5 @@ PyYAML==6.0.3
 streamlit==1.64.0
 streamlit-shadcn-ui==1.4.0
 plotly==7.1.0
+scikit-learn==1.9.1
 pytest==9.1.1

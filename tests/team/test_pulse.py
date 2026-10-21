@@ -1,7 +1,7 @@
 import pandas as pd
 
-from pulse.onoff import RHO, p_off
-from pulse.pulse import find_pulse_trains, off_runs, pulse_probability
+from team.pulse.onoff import RHO, p_off
+from team.pulse.pulse import find_pulse_trains, off_runs, pulse_probability
 
 DAYS = pd.date_range("2024-01-01", periods=200)
 
@@ -27,7 +27,7 @@ def test_pauses_of_mixed_length_form_one_train():
 
 
 def test_hsmm_absorbs_a_2_day_spike_and_ignores_a_short_outage():
-    from pulse.hsmm import p_off_hsmm
+    from team.pulse.hsmm import p_off_hsmm
     s = pd.Series(100.0, index=DAYS)
     s.iloc[20:34] = 0.0
     s.iloc[27:29] = 100.0                    # two days of full spend inside the pause

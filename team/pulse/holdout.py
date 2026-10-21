@@ -4,9 +4,9 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from pulse.hsmm import p_off_hsmm
-from pulse.onoff import RHO, active_level
-from pulse.pulse import MIN_DAYS, off_spells
+from team.pulse.hsmm import p_off_hsmm
+from team.pulse.onoff import RHO, active_level
+from team.pulse.pulse import MIN_DAYS, off_spells
 
 HOLDOUT_MEDIAN = 42.0   # days
 HOLDOUT_SIGMA = 0.8

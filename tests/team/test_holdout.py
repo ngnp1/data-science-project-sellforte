@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from pulse.holdout import find_holdouts
+from team.pulse.holdout import find_holdouts
 
 DAYS = pd.date_range("2024-01-01", periods=200)
 ON = pd.Series(True, index=DAYS)
@@ -26,7 +26,7 @@ def test_not_a_holdout_when_others_stop_too_or_it_is_a_pulse_pause():
 
 
 def test_single_channel_needs_all_but_one_off_and_three_channels():
-    from pulse.holdout import find_single_channel
+    from team.pulse.holdout import find_single_channel
     three = {"A": _ch([(60, 42)]), "B": _ch([(60, 42)]), "C": _ch()}
     [(ch, a, b, conf)] = find_single_channel(three)
     assert (ch, a, b) == ("C", DAYS[60], DAYS[101]) and 0.9 < conf <= 1
@@ -35,7 +35,7 @@ def test_single_channel_needs_all_but_one_off_and_three_channels():
 
 
 def test_dark_period_needs_every_channel_off():
-    from pulse.holdout import find_dark_periods
+    from team.pulse.holdout import find_dark_periods
     market = {"A": _ch([(60, 42)]), "B": _ch([(60, 42)])}
     [(a, b, conf)] = find_dark_periods(market)
     assert (a, b) == (DAYS[60], DAYS[101]) and 0.9 < conf <= 1
@@ -46,7 +46,7 @@ def test_dark_period_needs_every_channel_off():
 
 
 def test_staggered_launch_is_a_late_start_relative_to_another_market():
-    from pulse.holdout import find_staggered_launches, market_p_off
+    from team.pulse.holdout import find_staggered_launches, market_p_off
     markets = {"X": {"A": _ch(), "B": _ch()}, "Y": {"A": _ch([(0, 60)]), "B": _ch()}}
     ps = {c: market_p_off(mk) for c, mk in markets.items()}
     [(country, ch, a, b, conf)] = find_staggered_launches(markets, ps)

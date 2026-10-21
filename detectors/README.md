@@ -2,6 +2,15 @@
 
 The app and the evaluation harness run any detector registered here. Our rule-based library ([`detection/`](../detection/README.md)) is one of them, wrapped in [rule_based.py](rule_based.py).
 
+## Registered detectors
+
+| Key | Name | Code |
+|---|---|---|
+| `rule_based` | Rule-based (ours) | [`detection/`](../detection/README.md) |
+| `team` | Team (combined) | [`team/`](../team/__init__.py): single channel by Nam Phu, holdout and staggered launch by Thai, pulse and dark period by Triet, budget step by David |
+
+Score either one on the sample with `python -m scripts.evaluate_sample --detector <key>`.
+
 ## Write one
 
 Create `detectors/my_detector.py`:

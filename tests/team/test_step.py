@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pulse.step import find_steps
+from team.pulse.step import find_steps
 
 DAYS = pd.date_range("2024-01-01", periods=365)
 

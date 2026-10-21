@@ -6,7 +6,7 @@ import math
 import numpy as np
 import pandas as pd
 
-from pulse.pulse import MIN_DAYS
+from team.pulse.pulse import MIN_DAYS
 
 LEVEL_DAYS = 100.0      # prior: a budget level typically lasts about a quarter
 STEP_MIN_RATIO = 1.5    # smallest change called a new level: 1.5x up or down

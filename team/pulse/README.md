@@ -1,7 +1,7 @@
 # Informative-period detection
 
-Spend-only detector for the six period types. Entry point: `pulse.detect:detect`
-(`python -m benchmark.eval.run_dev --detector pulse.detect:detect --load-data`).
+Spend-only detector for the six period types. Entry point: `team.pulse.detect:detect`
+(`python -m benchmark.eval.run_dev --detector team.pulse.detect:detect --load-data`).
 
 ## On/off model (shared by every detector)
 

@@ -32,7 +32,7 @@ def default() -> Detector:
 # Ours comes first, so it is the default. A detector module that is not listed
 # here is never imported and never registers -- tests/detectors/test_registry.py
 # fails if a file in this package is missing from the list.
-MODULES = ("detectors.rule_based",)
+MODULES = ("detectors.rule_based", "detectors.team")
 
 
 def _load() -> None:
