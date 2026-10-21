@@ -460,3 +460,21 @@ def test_the_app_uses_the_team_detector_by_default():
     assert any("Detector: Team (combined)" in c.value for c in app.caption)
     assert len(app.dataframe[0].value) == 6
     assert inspected(app).startswith("#1 ·")
+
+
+def test_periods_can_be_sorted_by_sales_change_without_changing_rank():
+    app = run_app()
+    sort = next(r for r in app.radio if r.label == "Sort by")
+    assert sort.value == "Most useful"
+    sort.set_value("Biggest sales change").run()
+    assert not app.exception
+    frame = app.dataframe[0].value
+    cells = list(frame["Sales change"])
+    known = [c for c in cells if c != "No sales data"]
+    assert cells[:len(known)] == known  # periods without a reading go last
+    sizes = [abs(float(c.rstrip("%"))) for c in known]
+    assert sizes == sorted(sizes, reverse=True)
+    assert sorted(frame["Rank"]) == [1, 2, 3, 4, 5, 6]
+    assert list(frame["Rank"]) != [1, 2, 3, 4, 5, 6]
+    assert any("Biggest sales change first" in c.value for c in app.caption)
+    assert inspected(app).startswith("#1 ·")

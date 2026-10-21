@@ -172,6 +172,20 @@ def caveats(e, r) -> list[str]:
 
 
 
+SORTS = {"Most useful": "Most useful first. Click a row to see it below.",
+         "Biggest sales change": "Biggest sales change first, up or down. Rank stays "
+                                 "most useful first. Click a row to see it below."}
+
+
+def by_sales_change(events, reads) -> list:
+    """Largest sales change either way first; periods without a reading last.
+    Only reorders the table: the ranking itself never looks at sales."""
+    def size(e):
+        effect = getattr(reads[event_id(e)], "effect", None)
+        return (effect is None, -abs(effect or 0.0))
+    return sorted(events, key=size)
+
+
 def table(visible, rank, reads) -> None:
     rows = []
     for e in visible:
@@ -405,8 +419,10 @@ def main():
                     width="stretch", config={"displayModeBar": False})
 
     st.markdown("#### Periods")
-    st.caption("Most useful first. Click a row to see it below.")
-    table(visible, rank, reads)
+    sort = st.radio("Sort by", list(SORTS), horizontal=True, key="table_sort")
+    st.caption(SORTS[sort])
+    table(by_sales_change(visible, reads) if sort == "Biggest sales change" else visible,
+          rank, reads)
 
     st.divider()
     e = next(x for x in visible if event_id(x) == selected)
