@@ -11,6 +11,7 @@ def detect(media_df, sales_df, sid: str) -> list[Event]:
     DEBUG = False
     EPSILON = 10
     NR_OF_CONFIRMATION_DAYS = 7
+    MOVING_AVG_WINDOW_SIZE = 15
     events = []
 
     spend = (
@@ -34,7 +35,13 @@ def detect(media_df, sales_df, sid: str) -> list[Event]:
         date = country_data["date"]
         last_date = date.max()
         for channel in spend_channels:
-            spend = country_data[[channel]]
+            # Making sure that the moving average doesn't blur the
+            spend = country_data[[channel]].copy()
+            zero_values = spend <= EPSILON
+            originial_vals = spend[zero_values]
+            spend[zero_values] = np.nan
+            spend = spend.rolling(window=MOVING_AVG_WINDOW_SIZE, center=True, min_periods=1).mean()
+            spend[zero_values] = originial_vals
 
             silhouette_index = []
             kmeans_labels = []
