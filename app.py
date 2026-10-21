@@ -24,6 +24,9 @@ ROUGH = "Estimates only. They don't prove what caused the change."
 DEFINITIONS = ("'Vs other markets' is the sales change other markets didn't see. It counts as "
                "small when it is within twice the usual swing. 'Return' is extra sales per extra "
                "unit of spend, shown only when the change is not small and spend moved at least 10%.")
+# The combined Team detector scores best on the dev split; fall back to the
+# first registered detector when it is missing.
+UI_DEFAULT_DETECTOR = "team"
 CARRYOVER_NOTE = "Ads keep working for a while after they stop, so a pause's effect is understated."
 
 
@@ -354,9 +357,12 @@ def main():
     detectors = registry.available()
     detector = registry.default()
     if len(detectors) > 1:
-        names = [d.name for d in detectors]
-        chosen_name = st.sidebar.selectbox("Detector", names)
-        detector = detectors[names.index(chosen_name)]
+        keys = [d.key for d in detectors]
+        default = UI_DEFAULT_DETECTOR if UI_DEFAULT_DETECTOR in keys else keys[0]
+        chosen = st.sidebar.selectbox("Detector", keys, index=keys.index(default),
+                                      format_func=lambda k: registry.get(k).name,
+                                      key="detector")
+        detector = registry.get(chosen)
         label = f"{label} · Detector: {detector.name}"
     try:
         with st.spinner("Scanning…"):

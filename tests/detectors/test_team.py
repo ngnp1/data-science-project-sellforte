@@ -77,3 +77,27 @@ def test_a_holdout_on_the_same_window_as_a_single_channel_period_is_dropped():
     elsewhere = replace(same, country_code="SE")
     kept = _drop_renamed_holdouts([single, same, other, elsewhere])
     assert same not in kept and all(f in kept for f in (single, other, elsewhere))
+
+
+def test_team_findings_are_scored_like_ours(team_findings):
+    for f in team_findings:
+        assert f.informativeness is not None and f.detection_confidence is not None
+        assert f.evidence["confidence_sub_scores"] and f.evidence["informativeness_drivers"]
+        assert f.explanation.startswith(f"Found by {OWNERS[f.event_type]}'s algorithm. ")
+        assert len(f.explanation) > len(f"Found by {OWNERS[f.event_type]}'s algorithm. ")
+    launch = next(f for f in team_findings if f.event_type == "staggered_launch")
+    assert launch.evidence["source"] == "tvh-ds" and launch.evidence["launch_verification"]
+
+
+def test_scoring_is_shared_with_our_library(frames):
+    from detection.io.panel import build_panel
+    from detection.scoring import score_findings
+    media, sales = frames
+    ours = run_detection(media, sales)
+    raw = [type(e)(sid=e.sid, country_code=e.country_code, channel=e.channel,
+                   event_type=e.event_type, start=e.start, end=e.end,
+                   magnitude_ratio=e.magnitude_ratio, components=e.components)
+           for e in ours]
+    rescored = score_findings(raw, build_panel(media, sales))
+    assert [(e.event_type, e.country_code, e.informativeness is not None) for e in rescored] == \
+        [(e.event_type, e.country_code, True) for e in ours]

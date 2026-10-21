@@ -7,8 +7,13 @@ from streamlit.testing.v1 import AppTest
 APP = str(Path(__file__).resolve().parents[1] / "app.py")
 
 
-def run_app() -> AppTest:
-    return AppTest.from_file(APP, default_timeout=60).run()
+def run_app(detector: str | None = "rule_based") -> AppTest:
+    # Most tests pin our library, whose findings on the sample they assert;
+    # pass None to get the app's own default.
+    app = AppTest.from_file(APP, default_timeout=60)
+    if detector:
+        app.session_state["detector"] = detector
+    return app.run()
 
 
 def inspected(app: AppTest) -> str:
@@ -222,7 +227,9 @@ app.load_sample = lambda: (m[m.country_code == "DE"], s[s.country_code == "DE"])
 def run_patched(patch: str) -> AppTest:
     script = (f"import sys\nsys.path.insert(0, {ROOT!r})\nimport importlib, app\n"
               f"app = importlib.reload(app)\n{patch}\napp.main()\n")
-    return AppTest.from_string(script, default_timeout=60).run()
+    app = AppTest.from_string(script, default_timeout=60)
+    app.session_state["detector"] = "rule_based"
+    return app.run()
 
 
 def test_panel_surfaces_data_warnings():
@@ -346,7 +353,7 @@ def test_switching_detector_changes_the_findings(only_ours):
     picker = next(s for s in app.sidebar.selectbox if s.label == "Detector")
     assert picker.options == ["Rule-based (ours)", "Stub detector"]
     assert len(app.dataframe[0].value) == 6
-    picker.set_value("Stub detector").run()
+    picker.set_value("stub").run()
     assert not app.exception
     assert len(app.dataframe[0].value) == 2
     assert set(app.dataframe[0].value["Priority"]) == {"Unscored"}
@@ -362,7 +369,7 @@ def test_switching_detector_drops_a_selection_it_does_not_report(only_ours):
     app.session_state["selected"] = SAMPLE_IDS[2]       # FI single channel: ours only
     app.run()
     assert inspected(app).startswith("#2 · FI")
-    next(s for s in app.sidebar.selectbox if s.label == "Detector").set_value("Stub detector").run()
+    next(s for s in app.sidebar.selectbox if s.label == "Detector").set_value("stub").run()
     assert not app.exception
     assert inspected(app) == "#1 · AT · Facebook paused"
 
@@ -442,3 +449,14 @@ def test_sales_change_cells_show_one_thing():
     assert viewer.sales_column(r) == f"{r.effect:+.1%}"
     assert viewer.sales_column(replace(r, readable=False)) == f"{r.effect:+.1%}"
     assert "chance" in viewer.SALES_CHANGE_HELP and "unclear" not in viewer.SALES_CHANGE_HELP.lower()
+
+
+
+def test_the_app_uses_the_team_detector_by_default():
+    app = run_app(detector=None)
+    assert not app.exception
+    picker = next(s for s in app.sidebar.selectbox if s.label == "Detector")
+    assert picker.value == "team"
+    assert any("Detector: Team (combined)" in c.value for c in app.caption)
+    assert len(app.dataframe[0].value) == 6
+    assert inspected(app).startswith("#1 ·")

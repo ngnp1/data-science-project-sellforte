@@ -14,7 +14,9 @@ from dataclasses import replace
 
 import pandas as pd
 
+from detection.io.panel import build_panel
 from detection.model import EVENT_TYPES, DetectedEvent
+from detection.scoring import score_findings
 from detectors.base import Detector
 from team.pulse.detect import detect as triet
 from team.single_channel import run_detection as nam_phu
@@ -59,7 +61,7 @@ def _convert(event, owner: str) -> DetectedEvent:
         components=tuple((pd.Timestamp(a), pd.Timestamp(b))
                          for a, b in (getattr(event, "components", ()) or ())),
         tags=tuple(getattr(event, "tags", ()) or ()),
-        evidence={"source": owner},
+        evidence={"source": owner, "source_confidence": getattr(event, "detection_confidence", None)},
         detection_confidence=getattr(event, "detection_confidence", None),
         explanation=f"Found by {owner}'s algorithm.",
     )
@@ -79,7 +81,11 @@ class TeamDetector(Detector):
             findings += [_convert(e, owner) for e in run(media, sales)
                          if e.event_type in patterns]
         findings = _drop_renamed_holdouts(findings)
-        return sorted(findings, key=lambda f: (str(f.country_code), f.start, str(f.channel)))
+        # Rank, check and explain them exactly as our library does, so the app
+        # treats both detectors alike; keep who found each one in front.
+        scored = score_findings(findings, build_panel(media, sales))
+        return [replace(f, explanation=f"Found by {f.evidence['source']}'s algorithm. "
+                                       f"{f.explanation}") for f in scored]
 
 
 DETECTORS = [TeamDetector()]

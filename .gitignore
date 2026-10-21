@@ -220,6 +220,7 @@ __marimo__/
 # synthetic_data_generator
 synthetic_data_generator/.venv/
 synthetic_data_generator/raw_daily_wide.csv
+synthetic_data_generator/generated/
 __pycache__/
 *.pyc
 

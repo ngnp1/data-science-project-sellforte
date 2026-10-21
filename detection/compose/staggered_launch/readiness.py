@@ -14,6 +14,13 @@ from detection.primitives.zero_runs import off_mask
 from detection.score import subject_channels
 
 
+def _onset(event: DetectedEvent) -> pd.Timestamp:
+    """First active day of a launch. Recorded by our detector; for a launch
+    from another detector it is the day after the inactive window ends."""
+    onset = event.evidence.get("onset")
+    return pd.Timestamp(onset) if onset is not None else event.end + pd.Timedelta(days=1)
+
+
 def _check(status: str, code: str, **evidence) -> dict:
     return {"status": status, "code": code, **evidence}
 
@@ -69,7 +76,7 @@ def _competing_changes(events: list[DetectedEvent], panel: Panel, country: str,
             continue
         start, end = other.start, other.end
         if other.event_type == "staggered_launch":
-            start = end = pd.Timestamp(other.evidence["onset"])
+            start = end = _onset(other)
         if start <= dates[-1] and dates[0] <= end:
             changes.append({"event_type": other.event_type, "channel": other.channel,
                             "start": str(start.date()), "end": str(end.date())})
@@ -108,7 +115,7 @@ def _sales_comparison(panel: Panel, target: str, peer: str,
 
 
 def _verify(event: DetectedEvent, events: list[DetectedEvent], panel: Panel) -> dict:
-    onset = pd.Timestamp(event.evidence["onset"])
+    onset = _onset(event)
     pre = pd.date_range(onset - pd.Timedelta(days=params.LAUNCH_PRE_DAYS),
                         periods=params.LAUNCH_PRE_DAYS)
     post = pd.date_range(onset, periods=params.LAUNCH_POST_DAYS)

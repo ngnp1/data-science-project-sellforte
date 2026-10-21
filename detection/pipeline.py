@@ -28,19 +28,13 @@ one layer down, in compose.cross_market.
 """
 from __future__ import annotations
 
-from dataclasses import replace
-
 import pandas as pd
 
-from detection.compose.cross_market import annotate
 from detection.compose.staggered_launch.detector import find_staggered_launches
 from detection.compose.label import label_market
-from detection.explain import explain
 from detection.io.panel import build_panel
-from detection.compose.staggered_launch.readiness import verify_staggered_launches
 from detection.model import DetectedEvent
-from detection.score import confidence, informativeness
-from detection.validity import assess
+from detection.scoring import score_findings
 
 # The historical calibration predates the current detector. Scores are raw
 # heuristics until an independent calibration set supports a new mapping.
@@ -61,40 +55,5 @@ def run_detection(media_df: pd.DataFrame, sales_df: pd.DataFrame | None = None,
     for country in panel.countries:
         events.extend(label_market(panel, country, sid))
 
-    events = annotate(events, panel)
     events.extend(find_staggered_launches(panel, sid))
-
-    annotated = []
-    for e in events:
-        overlapping = any(other is not e and other.country_code == e.country_code
-                          and other.start <= e.end and e.start <= other.end for other in events)
-        evidence = dict(e.evidence)
-        evidence.update(censored_start=e.start == panel.dates[0],
-                        censored_end=e.end == panel.dates[-1])
-        tags = tuple(dict.fromkeys((*e.tags, *(("confounded",) if overlapping else ()))))
-        annotated.append(replace(e, evidence=evidence, tags=tags))
-
-    scored = []
-    for e in annotated:
-        raw, parts = confidence(e, panel)
-        info, drivers = informativeness(e, panel)
-        verdict, reasons = assess(e, panel)
-        evidence = dict(e.evidence)
-        evidence.update(confidence_sub_scores=parts,
-                        informativeness_drivers=drivers,
-                        raw_confidence=raw, confidence_kind="heuristic")
-        e = replace(
-            e,
-            detection_confidence=raw,
-            informativeness=info,
-            validity=verdict,
-            validity_reasons=reasons,
-            evidence=evidence,
-        )
-        scored.append(e)
-    events = [replace(e, explanation=explain(e, panel))
-              for e in verify_staggered_launches(scored, panel)]
-
-    events.sort(key=lambda e: (str(e.country_code), e.start, str(e.channel),
-                               e.event_type))
-    return events
+    return score_findings(events, panel)
