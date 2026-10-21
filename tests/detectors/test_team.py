@@ -33,7 +33,7 @@ def test_each_pattern_comes_from_its_owner(team_findings):
     assert team_findings and all(isinstance(f, DetectedEvent) for f in team_findings)
     for f in team_findings:
         assert f.evidence["source"] == OWNERS[f.event_type]
-        assert f"Found by {OWNERS[f.event_type]}" in f.explanation
+        assert OWNERS[f.event_type] not in f.explanation
 
 
 def test_on_the_sample_it_finds_the_same_periods_as_our_library(frames, team_findings):
@@ -83,8 +83,7 @@ def test_team_findings_are_scored_like_ours(team_findings):
     for f in team_findings:
         assert f.informativeness is not None and f.detection_confidence is not None
         assert f.evidence["confidence_sub_scores"] and f.evidence["informativeness_drivers"]
-        assert f.explanation.startswith(f"Found by {OWNERS[f.event_type]}'s algorithm. ")
-        assert len(f.explanation) > len(f"Found by {OWNERS[f.event_type]}'s algorithm. ")
+        assert f.explanation and "Found by" not in f.explanation
     launch = next(f for f in team_findings if f.event_type == "staggered_launch")
     assert launch.evidence["source"] == "tvh-ds" and launch.evidence["launch_verification"]
 

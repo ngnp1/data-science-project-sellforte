@@ -48,8 +48,7 @@ def _drop_renamed_holdouts(findings: list[DetectedEvent]) -> list[DetectedEvent]
 def _convert(event, owner: str) -> DetectedEvent:
     if isinstance(event, DetectedEvent):
         # Already our type (tvh-ds): keep its evidence, e.g. the readiness checks.
-        return replace(event, sid="", evidence={**event.evidence, "source": owner},
-                       explanation=f"Found by {owner}'s algorithm.")
+        return replace(event, sid="", evidence={**event.evidence, "source": owner})
     return DetectedEvent(
         sid="",
         country_code=event.country_code,
@@ -63,7 +62,6 @@ def _convert(event, owner: str) -> DetectedEvent:
         tags=tuple(getattr(event, "tags", ()) or ()),
         evidence={"source": owner, "source_confidence": getattr(event, "detection_confidence", None)},
         detection_confidence=getattr(event, "detection_confidence", None),
-        explanation=f"Found by {owner}'s algorithm.",
     )
 
 
@@ -82,10 +80,9 @@ class TeamDetector(Detector):
                          if e.event_type in patterns]
         findings = _drop_renamed_holdouts(findings)
         # Rank, check and explain them exactly as our library does, so the app
-        # treats both detectors alike; keep who found each one in front.
-        scored = score_findings(findings, build_panel(media, sales))
-        return [replace(f, explanation=f"Found by {f.evidence['source']}'s algorithm. "
-                                       f"{f.explanation}") for f in scored]
+        # treats both detectors alike. Who found each one stays in evidence
+        # only; the app never shows it.
+        return score_findings(findings, build_panel(media, sales))
 
 
 DETECTORS = [TeamDetector()]
