@@ -39,7 +39,7 @@ def evaluate_sample():
     print("TRUTH:")
     for e in truth:
         print(e.sid, e.country_code, e.channel, e.event_type, e.start, e.end)
-        
+
     return {
         "dataset": "committed demonstration sample (not held out)",
         "overall": event_level(truth, pred),
