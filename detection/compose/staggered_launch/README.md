@@ -1,4 +1,4 @@
-# Staggered launches: detection and analysis readiness
+# Staggered launches: detection, analysis readiness, and priority
 
 The goal is to find a channel starting at different times across markets, then
 check whether each late start offers a useful opportunity for Sellforte to study
@@ -120,7 +120,61 @@ The existing viewer's evidence display exposes this structure. Launch explanatio
 include the readiness outcome; the existing generic informativeness score remains
 a separate heuristic and should not be interpreted as readiness or causal impact.
 
-## 4. Validation and limitations
+## 4. Rank and export launches
+
+The backend provides an explicit launch-only shortlist for downstream consumers:
+
+```python
+import json
+from detection.compose.staggered_launch import (
+    rank_staggered_launches,
+    summarize_staggered_launches,
+)
+
+# events is the existing output of run_detection(media, sales, sid).
+launches = rank_staggered_launches(events)
+rows = summarize_staggered_launches(events)
+payload = json.dumps(rows, allow_nan=False)
+```
+
+Both functions accept mixed event types and select every staggered launch,
+including those rejected by readiness. Priority is `analysis_ready`, then
+`needs_review`, then `not_analysis_ready`, then `unassessed`. Missing or
+unrecognized readiness evidence is unassessed, never assumed to pass.
+
+Within each group, existing informativeness and then confidence sort descending.
+Missing or non-finite scores sort last at their respective sort position.
+Scenario, market, channel, and event dates break ties deterministically. The
+ordering is an analysis triage policy, not a probability or a validated measure
+of usefulness. It does not correct limitations of the generic informativeness
+score or add new weights. In particular, that score's sales driver requires
+history before the initial inactive interval and can default even when there
+is enough history before the actual launch.
+
+`rank_staggered_launches` returns the original event objects without modifying
+them. `summarize_staggered_launches` returns independent JSON-compatible records:
+
+- `rank` (one-based), `sid`, `country_code`, and `channel`;
+- `launch_date`, `inactive_start`, and `inactive_end` as ISO date strings;
+- `readiness`, `reason_codes`, and `qualified_peers`;
+- `windows` containing `pre_start`, `pre_end`, `post_start`, and `post_end`;
+- existing `detection_confidence` and `informativeness` scores.
+
+Missing launch dates/windows and non-finite scores export as `null`. An onset
+is never inferred from the initial inactive interval. These helpers preserve
+classification, readiness evidence, original scores, and the public pipeline's
+existing output order. The shared viewer continues using its existing ranking.
+
+## 5. Development results and reproducibility
+
+The [tracked development report](../../../benchmark/reports/staggered-launch-dev-2026-10-18.md)
+records the completed 43-scenario baseline, explicit exclusions, detection
+metrics, readiness outcomes, and the command to reproduce it. Detailed outputs
+and append-only run history stay under the ignored local cache. The report
+command requires complete data for every selected development scenario; it
+never generates missing data or silently reduces coverage.
+
+## 6. Validation and limitations
 
 All screening thresholds live in `params.py` and are provisional defaults, not
 values validated by Sellforte. Tests cover sustained activity, onset separation,
