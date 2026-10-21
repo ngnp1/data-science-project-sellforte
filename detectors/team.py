@@ -10,6 +10,8 @@ comes with it.
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pandas as pd
 
 from detection.model import EVENT_TYPES, DetectedEvent
@@ -17,18 +19,24 @@ from detectors.base import Detector
 from team.holdout import run_detection as thai
 from team.pulse.detect import detect as triet
 from team.single_channel import run_detection as nam_phu
+from team.staggered_launch import run_detection as tvh_ds
 from team.step_change import detect as david
 
 # Teammate -> (their entry point, the patterns taken from it).
 SOURCES = (
     ("Nam Phu", lambda media, sales: nam_phu(media, sales, ""), {"single_channel"}),
-    ("Thai", lambda media, sales: thai(media, sales, ""), {"natural_holdout", "staggered_launch"}),
+    ("Thai", lambda media, sales: thai(media, sales, ""), {"natural_holdout"}),
+    ("tvh-ds", lambda media, sales: tvh_ds(media, sales, ""), {"staggered_launch"}),
     ("Triet", lambda media, sales: triet(media, sales, ""), {"channel_pulse", "dark_period"}),
     ("David", lambda media, sales: david(media, sales, ""), {"step_change"}),
 )
 
 
 def _convert(event, owner: str) -> DetectedEvent:
+    if isinstance(event, DetectedEvent):
+        # Already our type (tvh-ds): keep its evidence, e.g. the readiness checks.
+        return replace(event, sid="", evidence={**event.evidence, "source": owner},
+                       explanation=f"Found by {owner}'s algorithm.")
     return DetectedEvent(
         sid="",
         country_code=event.country_code,

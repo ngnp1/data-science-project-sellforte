@@ -8,7 +8,7 @@ from detectors import registry
 from tests.conftest import GENERATOR_DIR
 
 SAMPLE = GENERATOR_DIR / "data"
-OWNERS = {"single_channel": "Nam Phu", "natural_holdout": "Thai", "staggered_launch": "Thai",
+OWNERS = {"single_channel": "Nam Phu", "natural_holdout": "Thai", "staggered_launch": "tvh-ds",
           "channel_pulse": "Triet", "dark_period": "Triet", "step_change": "David"}
 
 
@@ -50,3 +50,15 @@ def test_the_harness_can_score_it(frames):
     from benchmark.eval.adapter import for_detector
     events = for_detector("team")(*frames, "sample")
     assert len(events) == 6 and {e.sid for e in events} == {"sample"}
+
+
+def test_staggered_launches_keep_tvh_ds_readiness_checks(frames, team_findings):
+    import app as viewer
+    from detection.io.panel import build_panel
+    from ui.readout import readout
+    launch = next(f for f in team_findings if f.event_type == "staggered_launch")
+    assert launch.evidence["source"] == "tvh-ds"
+    assert launch.evidence["launch_verification"]["status"]
+    panel = build_panel(*frames)
+    lines = viewer.caveats(launch, readout(launch, panel, team_findings))
+    assert any(line.startswith("Launch analysis readiness:") for line in lines)
