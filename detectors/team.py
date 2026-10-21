@@ -67,7 +67,7 @@ def _convert(event, owner: str) -> DetectedEvent:
 
 class TeamDetector(Detector):
     key = "team"
-    name = "Team (combined)"
+    name = "Combined"
     event_types = EVENT_TYPES
 
     def detect(self, media: pd.DataFrame,

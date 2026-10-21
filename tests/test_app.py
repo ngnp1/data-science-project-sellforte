@@ -457,7 +457,7 @@ def test_the_app_uses_the_team_detector_by_default():
     assert not app.exception
     picker = next(s for s in app.sidebar.selectbox if s.label == "Detector")
     assert picker.value == "team"
-    assert any("Detector: Team (combined)" in c.value for c in app.caption)
+    assert any("Detector: Combined" in c.value for c in app.caption)
     assert len(app.dataframe[0].value) == 6
     assert inspected(app).startswith("#1 ·")
 
