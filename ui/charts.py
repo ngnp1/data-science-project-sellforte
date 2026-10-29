@@ -79,8 +79,8 @@ def _period_map_lanes(events: list[DetectedEvent], markets: list[str]
     start-to-end span so all of its component bars and its label stay together.
     Markets with no findings still receive one lane for the data-span track.
     """
-    lane_gap = 0.48
-    market_gap = 0.36
+    lane_gap = 0.72
+    market_gap = 0.48
     y_by_event: dict[str, float] = {}
     market_centres: dict[str, float] = {}
     track_positions: list[float] = []
@@ -153,7 +153,7 @@ def period_map(events: list[DetectedEvent], markets: list[str], selected: str | 
                            yshift=7, showarrow=False,
                            text=f"<b>{short_label(e)}</b>" if chosen else short_label(e),
                            font=dict(size=11, color=INK[dark] if chosen else MUTED[dark]))
-    height = 70 + 32 * total_lanes + 14 * len(markets)
+    height = 70 + 44 * total_lanes + 16 * len(markets)
     _base_layout(fig, height, dark)
     fig.update_yaxes(tickmode="array",
                      tickvals=[market_centres[m] for m in markets], ticktext=markets,
