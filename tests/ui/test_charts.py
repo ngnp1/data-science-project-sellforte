@@ -3,6 +3,7 @@ from dataclasses import replace
 
 import pandas as pd
 
+from detection.model import DetectedEvent
 from ui.charts import ACCENT, MUTED, carryover_chart, event_chart, period_map
 from ui.labels import TYPES, event_id, short_label
 from ui.readout import readout
@@ -28,12 +29,42 @@ def test_period_map_bars_carry_event_ids(sample_events):
 
 def test_period_map_lists_every_market_and_colours_by_type(sample_events):
     fig = period_map(sample_events[:1], MARKETS, None)
-    assert list(fig.layout.yaxis.categoryarray) == MARKETS[::-1]
+    assert list(fig.layout.yaxis.ticktext) == MARKETS
     info = TYPES[sample_events[0].event_type]
     assert finding_bars(fig)[0].name == info.name
     assert finding_bars(fig)[0].marker.color == info.color
     assert finding_bars(period_map(sample_events[:1], MARKETS, None, dark=True))[0].marker.color \
         == info.color_dark
+
+
+def test_period_map_separates_overlapping_events_in_one_market():
+    events = [
+        DetectedEvent(sid="t", country_code="DE", channel=channel, event_type=kind,
+                      start=pd.Timestamp(start), end=pd.Timestamp(end))
+        for channel, kind, start, end in (
+            (None, "dark_period", "2024-02-01", "2024-03-10"),
+            ("TV", "natural_holdout", "2024-02-10", "2024-02-28"),
+            ("Radio", "step_change", "2024-02-15", "2024-03-05"),
+        )
+    ]
+    fig = period_map(events, ["DE"], None,
+                     (pd.Timestamp("2024-01-01"), pd.Timestamp("2024-04-01")))
+    positions = {cd[0]: y for trace in finding_bars(fig)
+                 for cd, y in zip(trace.customdata, trace.y)}
+    assert len(set(positions.values())) == 3
+    assert len({annotation.y for annotation in fig.layout.annotations}) == 3
+    assert list(fig.layout.yaxis.ticktext) == ["DE"]
+
+
+def test_period_map_reuses_a_lane_for_non_overlapping_events():
+    events = [
+        DetectedEvent(sid="t", country_code="DE", channel="TV", event_type="natural_holdout",
+                      start=pd.Timestamp("2024-01-01"), end=pd.Timestamp("2024-01-10")),
+        DetectedEvent(sid="t", country_code="DE", channel="Radio", event_type="step_change",
+                      start=pd.Timestamp("2024-02-01"), end=pd.Timestamp("2024-02-10")),
+    ]
+    fig = period_map(events, ["DE"], None)
+    assert len({y for trace in finding_bars(fig) for y in trace.y}) == 1
 
 
 def test_period_map_outlines_the_selected_finding(sample_events):
