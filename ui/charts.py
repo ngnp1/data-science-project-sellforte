@@ -71,18 +71,62 @@ def _fmt(day: pd.Timestamp) -> str:
     return f"{day.day} {day:%b %Y}"
 
 
+def _period_map_lanes(events: list[DetectedEvent], markets: list[str]
+                      ) -> tuple[dict[str, float], dict[str, float], list[float], int]:
+    """Place overlapping findings from one market on separate compact lanes.
+
+    Intervals that do not overlap reuse a lane.  A pulse reserves its complete
+    start-to-end span so all of its component bars and its label stay together.
+    Markets with no findings still receive one lane for the data-span track.
+    """
+    lane_gap = 0.48
+    market_gap = 0.36
+    y_by_event: dict[str, float] = {}
+    market_centres: dict[str, float] = {}
+    track_positions: list[float] = []
+    cursor = 0.0
+    total_lanes = 0
+
+    for market in markets:
+        found = sorted(
+            (e for e in events if e.country_code == market),
+            key=lambda e: (e.start, e.end, event_id(e)),
+        )
+        lane_ends: list[pd.Timestamp] = []
+        lane_by_event: dict[str, int] = {}
+        for event in found:
+            lane = next((i for i, end in enumerate(lane_ends) if end < event.start),
+                        len(lane_ends))
+            if lane == len(lane_ends):
+                lane_ends.append(event.end)
+            else:
+                lane_ends[lane] = event.end
+            lane_by_event[event_id(event)] = lane
+
+        count = max(1, len(lane_ends))
+        positions = [cursor + lane * lane_gap for lane in range(count)]
+        track_positions.extend(positions)
+        market_centres[market] = sum(positions) / len(positions)
+        for eid, lane in lane_by_event.items():
+            y_by_event[eid] = positions[lane]
+        total_lanes += count
+        cursor = positions[-1] + lane_gap + market_gap
+
+    return y_by_event, market_centres, track_positions, total_lanes
+
+
 def period_map(events: list[DetectedEvent], markets: list[str], selected: str | None,
                period: tuple[pd.Timestamp, pd.Timestamp] | None = None,
                dark: bool = False) -> go.Figure:
-    """One row per market: a faint track for the data span, a thin bar per
-    finding window coloured by type, and a direct label naming each finding."""
+    """A compact timeline with extra lanes when findings overlap in a market."""
     fig = go.Figure()
+    y_by_event, market_centres, tracks, total_lanes = _period_map_lanes(events, markets)
     if period is not None:
         lo, hi = period
         fig.add_trace(go.Bar(
-            orientation="h", y=markets, base=[lo] * len(markets),
-            x=[(hi + DAY - lo) / pd.Timedelta(milliseconds=1)] * len(markets),
-            marker=dict(color=FAINT[dark], line=dict(width=0)), width=0.34,
+            orientation="h", y=tracks, base=[lo] * len(tracks),
+            x=[(hi + DAY - lo) / pd.Timedelta(milliseconds=1)] * len(tracks),
+            marker=dict(color=FAINT[dark], line=dict(width=0)), width=0.30,
             hoverinfo="skip", showlegend=False))
     for kind, info in TYPES.items():
         bars = [(e, a, b) for e in events if e.event_type == kind for a, b in _windows(e)]
@@ -91,7 +135,7 @@ def period_map(events: list[DetectedEvent], markets: list[str], selected: str | 
         ids = [event_id(e) for e, _, _ in bars]
         fig.add_trace(go.Bar(
             orientation="h", name=info.name,
-            y=[e.country_code for e, _, _ in bars],
+            y=[y_by_event[event_id(e)] for e, _, _ in bars],
             base=[a for _, a, _ in bars],
             x=[(b + DAY - a) / pd.Timedelta(milliseconds=1) for _, a, b in bars],
             customdata=[[i, title(e), f"{_fmt(e.start)} – {_fmt(e.end)} · {e.n_days} days"]
@@ -101,16 +145,19 @@ def period_map(events: list[DetectedEvent], markets: list[str], selected: str | 
                         line=dict(color=INK[dark],
                                   width=[2 if i == selected else 0 for i in ids])),
             selected=dict(marker=dict(opacity=1)), unselected=dict(marker=dict(opacity=1)),
-            width=0.34))
+            width=0.30))
     for e in events:
         chosen = event_id(e) == selected
-        fig.add_annotation(x=e.start, y=e.country_code, xanchor="left", yanchor="bottom",
+        fig.add_annotation(x=e.start, y=y_by_event[event_id(e)],
+                           xanchor="left", yanchor="bottom",
                            yshift=7, showarrow=False,
                            text=f"<b>{short_label(e)}</b>" if chosen else short_label(e),
                            font=dict(size=11, color=INK[dark] if chosen else MUTED[dark]))
-    _base_layout(fig, 70 + 46 * len(markets), dark)
-    fig.update_yaxes(categoryorder="array", categoryarray=markets[::-1],
-                     type="category", fixedrange=True, showgrid=False)
+    height = 70 + 32 * total_lanes + 14 * len(markets)
+    _base_layout(fig, height, dark)
+    fig.update_yaxes(tickmode="array",
+                     tickvals=[market_centres[m] for m in markets], ticktext=markets,
+                     autorange="reversed", fixedrange=True, showgrid=False)
     fig.update_xaxes(type="date", range=list(period) if period else None, dtick="M3",
                      tickformat="%b %Y", showgrid=True, gridcolor=GRID[dark])
     fig.update_layout(barmode="overlay", clickmode="event+select", showlegend=True)
